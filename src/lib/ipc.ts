@@ -241,18 +241,33 @@ export async function getUsage(): Promise<ClaudeUsage | null> {
  * Workspace permission mode. `bypass-all` / `allow-all` / `ask`, which is the
  * setting Nimbalyst actually applies -- deliberately not the per-session
  * Shift+Tab mode the CLI status line reads out of the transcript.
+ *
+ * There is no stored `auto` value; auto mode is a combination. Nimbalyst keeps
+ * `agentPermissions: { permissionMode, allowAllUsesClassifier }`, and
+ * `bypass-all` with the classifier ON launches Claude Code in auto mode -- the
+ * classifier screens every tool call. Reading `permissionMode` alone therefore
+ * reports "Bypass" for a workspace that is really in Auto. `bypass-all` with
+ * the classifier off is genuine bypass and stays "Bypass".
  */
 export async function getPermissionMode(workspacePath: string): Promise<string | null> {
   // The real home of the value: workspace state -> agentPermissions.permissionMode.
   // (`agentPermissionMode` only exists as a flattened field in the settings
   // overview, not as a settings key.)
   const state = await invoke<{
-    agentPermissions?: { permissionMode?: string | null };
+    agentPermissions?: {
+      permissionMode?: string | null;
+      allowAllUsesClassifier?: boolean | null;
+    };
     agentPermissionMode?: string | null;
   }>('workspace:get-state', workspacePath);
 
   const mode = state?.agentPermissions?.permissionMode ?? state?.agentPermissionMode;
-  if (typeof mode === 'string' && mode) return mode;
+  if (typeof mode === 'string' && mode) {
+    if (mode === 'bypass-all' && state?.agentPermissions?.allowAllUsesClassifier === true) {
+      return 'auto';
+    }
+    return mode;
+  }
 
   const fallback = await invoke<string>('app-settings:get', 'agentPermissionMode');
   return typeof fallback === 'string' && fallback ? fallback : null;
