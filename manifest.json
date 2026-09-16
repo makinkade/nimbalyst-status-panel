@@ -1,0 +1,33 @@
+{
+  "id": "com.mkinkade.status-panel",
+  "name": "Status Panel",
+  "version": "0.1.0",
+  "description": "Bottom panel mirroring the Claude Code CLI status line: model, effort, permission mode, directory, branch, context usage and plan limits",
+  "author": "mkinkade",
+  "main": "dist/index.js",
+  "styles": "dist/index.css",
+  "apiVersion": "1.0.0",
+  "permissions": {
+    "filesystem": true,
+    "catalog": ["nimbalyst-database-read"]
+  },
+  "contributions": {
+    "keybindings": [
+      {
+        "key": "ctrl+shift+s",
+        "command": "com.mkinkade.status-panel.status-line.toggle"
+      }
+    ],
+    "panels": [
+      {
+        "id": "status-line",
+        "title": "Status",
+        "icon": "monitoring",
+        "placement": "bottom",
+        "activationEvents": ["onStartup"],
+        "order": 70,
+        "tooltip": "Model, effort, permission mode, working directory, branch, context usage and plan limits for the active session."
+      }
+    ]
+  }
+}
