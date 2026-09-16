@@ -42,6 +42,15 @@ export function permissionModeColor(label: string): string {
   }
 }
 
+/**
+ * For values the panel cannot vouch for (stale readings, unavailable data).
+ *
+ * Deliberately not PALETTE.light: that is Night Owl's foreground, meant to sit
+ * on dark navy, and it disappears against a light theme -- a filled bar drawn
+ * in it reads as an empty one. This follows the host theme instead.
+ */
+export const MUTED = 'var(--nim-text-muted)';
+
 export const BAR_LENGTH = 10;
 
 /** Filled-cell count for a percentage, clamped to the bar. */

@@ -13,7 +13,7 @@ import { DataAccess, EffortSource, extractTokenUsage } from './lib/ipc';
 import { friendlyModelName } from './lib/modelNames';
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
 import { ExecFn } from './lib/planUsage';
-import { PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
+import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
 import { SegmentId } from './segments';
 import { PanelStorage, useSegmentConfig } from './useSegmentConfig';
 import { Status, useStatus } from './useStatus';
@@ -140,7 +140,7 @@ function buildSegments(status: Status, workspacePath: string): Record<SegmentId,
       // say why instead of looking like the segment was never configured.
       <Chip
         icon="shield"
-        accent={PALETTE.light}
+        accent={MUTED}
         title="workspace:get-state returned no agentPermissions.permissionMode"
       >
         <span className="sp-label">Mode —</span>
@@ -165,7 +165,7 @@ function buildSegments(status: Status, workspacePath: string): Record<SegmentId,
     ) : (
       <Chip
         icon="call_split"
-        accent={PALETTE.light}
+        accent={MUTED}
         title={
           git.repoPath
             ? 'git:branches returned no current branch'
@@ -193,7 +193,7 @@ function buildSegments(status: Status, workspacePath: string): Record<SegmentId,
           )}
         </Chip>
       ) : (
-        <Chip icon="database" accent={PALETTE.light} title={describeMissingContext(status, tokens, contextWindow)}>
+        <Chip icon="database" accent={MUTED} title={describeMissingContext(status, tokens, contextWindow)}>
           <span className="sp-label">Context —</span>
         </Chip>
       ),
@@ -208,7 +208,7 @@ function buildSegments(status: Status, workspacePath: string): Record<SegmentId,
       // is the case worth flagging.
       <Chip
         icon="speed"
-        accent={PALETTE.light}
+        accent={MUTED}
         title={
           planUsage
             ? 'No model-scoped caps in the usage API right now'
@@ -338,7 +338,7 @@ function UsageChip({ bar }: { bar: UsageBar }) {
   const stale = !!bar.staleSince;
   // A stale number must not keep its red/green authority -- the colour is a
   // claim about right now.
-  const color = stale ? PALETTE.light : usageColor(bar.percent);
+  const color = stale ? MUTED : usageColor(bar.percent);
   const reset = formatResetTime(bar.reset);
   const countdown = formatCountdown(bar.reset);
 
