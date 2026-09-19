@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockInvoke = vi.fn();
 const mockFetch = vi.fn();
 
-vi.mock('./ipc', () => ({ invoke: mockInvoke }));
+vi.mock('./ipc', () => ({ invoke: mockInvoke, invokeQuiet: mockInvoke }));
 
 const CACHE_FILE = 'statusline-usage-cache.json';
 const CREDENTIALS_FILE = '.credentials.json';

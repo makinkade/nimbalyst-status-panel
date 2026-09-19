@@ -19,7 +19,7 @@
  * credentials file.
  */
 
-import { invoke } from './ipc';
+import { invokeQuiet } from './ipc';
 
 export interface ScopedLimit {
   label: string;
@@ -305,7 +305,7 @@ const WRITER_ID = Math.random().toString(36).slice(2, 10);
  */
 async function writeCache(usage: PlanUsage): Promise<void> {
   const suffix = `.${WRITER_ID}.tmp`;
-  const written = await invoke<GlobalFileResult>(
+  const written = await invokeQuiet<GlobalFileResult>(
     'write-global-claude-file',
     `${CACHE_FILE}${suffix}`,
     JSON.stringify(usage),
@@ -317,7 +317,7 @@ async function writeCache(usage: PlanUsage): Promise<void> {
   const tempPath = written?.success ? written.filePath : undefined;
   if (!tempPath || !tempPath.endsWith(suffix)) return;
 
-  await invoke('move-file', tempPath, tempPath.slice(0, -suffix.length));
+  await invokeQuiet('move-file', tempPath, tempPath.slice(0, -suffix.length));
 }
 
 interface GlobalFileResult {
@@ -334,11 +334,15 @@ interface GlobalFileResult {
  * which is what makes this work off Windows, where the old exec command baked
  * in `%USERPROFILE%\.claude`. A missing file comes back as `success: false`
  * rather than throwing, so no credentials is silently no usage.
+ *
+ * `invokeQuiet` covers the other direction: a channel the host cannot answer at
+ * all is logged at debug. This runs once a minute for as long as the panel is
+ * open, so an unavailable reading should not also mean a warning a minute.
  */
 async function readClaudeFile(
   relativePath: string,
 ): Promise<{ content: string; filePath: string } | null> {
-  const result = await invoke<GlobalFileResult>('read-global-claude-file', relativePath);
+  const result = await invokeQuiet<GlobalFileResult>('read-global-claude-file', relativePath);
   if (!result?.success) return null;
   if (typeof result.content !== 'string' || !result.filePath) return null;
   return { content: result.content, filePath: result.filePath };

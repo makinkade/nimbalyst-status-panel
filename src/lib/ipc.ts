@@ -18,12 +18,33 @@ function bridge(): ElectronBridge | null {
 }
 
 export async function invoke<T>(channel: string, ...args: unknown[]): Promise<T | null> {
+  return request<T>(channel, args, 'warn');
+}
+
+/**
+ * The same call, logged at debug.
+ *
+ * For callers that poll and already treat "no answer" as an ordinary outcome.
+ * The plan usage client asks for two files a minute and falls back to its
+ * cached reading when either is unreachable, so warning on each would turn an
+ * unavailable reading into a console entry a minute. The failure still has to
+ * be findable -- it just should not announce itself.
+ */
+export async function invokeQuiet<T>(channel: string, ...args: unknown[]): Promise<T | null> {
+  return request<T>(channel, args, 'debug');
+}
+
+async function request<T>(
+  channel: string,
+  args: unknown[],
+  level: 'warn' | 'debug',
+): Promise<T | null> {
   const api = bridge();
   if (!api) return null;
   try {
     return (await api.invoke(channel, ...args)) as T;
   } catch (error) {
-    console.warn(`[status-panel] ${channel} failed:`, error);
+    console[level](`[status-panel] ${channel} failed:`, error);
     return null;
   }
 }
