@@ -78,15 +78,15 @@ describe('no bridge', () => {
 });
 
 /**
- * GET-85: the panel with the database path off, running on `sessions:list` +
- * `sessions:get` alone.
+ * Session resolution over IPC -- since GET-86 dropped the database permission,
+ * `sessions:list` + `sessions:get` is the only path there is.
  *
  * The shapes below are the host's, not invented: `sessions:list` answers
  * `{ success, sessions }` whose entries always carry `messageCount: 0` and
  * `metadata: {}`, and whose `updatedAt` is `GREATEST(own, newest child)`.
  * `sessions:get` answers `{ success, session }` with the row itself.
  */
-describe('getFocusedSession without database access', () => {
+describe('getFocusedSession', () => {
   const CONTEXT = { currentContext: { tokens: 60_435, contextWindow: 200_000 } };
 
   /** A `sessions:list` entry exactly as the host projects one. */

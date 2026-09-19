@@ -9,7 +9,7 @@ import {
   permissionModeLabel,
   titleCase,
 } from './lib/format';
-import { DataAccess, EffortSource, extractTokenUsage } from './lib/ipc';
+import { EffortSource, extractTokenUsage } from './lib/ipc';
 import { friendlyModelName } from './lib/modelNames';
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
 import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
@@ -22,7 +22,6 @@ interface PanelHost {
   workspacePath: string;
   getPrimaryFolderPath: () => string;
   storage?: PanelStorage;
-  data?: DataAccess;
 }
 
 /**
@@ -44,7 +43,7 @@ interface UsageBar {
 
 export function StatusPanel({ host }: { host: PanelHost }) {
   const workspacePath = host.getPrimaryFolderPath?.() ?? host.workspacePath;
-  const status = useStatus(workspacePath, host.data);
+  const status = useStatus(workspacePath);
   const { config, update, reset } = useSegmentConfig(host.storage);
 
   // Name the scoped-caps row after the caps actually in force, so the config

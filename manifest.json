@@ -8,8 +8,7 @@
   "styles": "dist/index.css",
   "apiVersion": "1.0.0",
   "permissions": {
-    "filesystem": true,
-    "catalog": ["nimbalyst-database-read"]
+    "filesystem": true
   },
   "contributions": {
     "keybindings": [

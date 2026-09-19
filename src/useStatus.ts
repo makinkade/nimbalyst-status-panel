@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ClaudeUsage,
-  DataAccess,
   GitInfo,
   ModelInfo,
   SessionRecord,
@@ -41,7 +40,7 @@ const PLAN_USAGE_POLL_MS = 60_000;
  * Event subscriptions drive the refresh; the timer is the backstop for the
  * values nothing broadcasts (git branch, effort, permission mode).
  */
-export function useStatus(workspacePath: string, data?: DataAccess): Status {
+export function useStatus(workspacePath: string): Status {
   const [status, setStatus] = useState<Status>({
     session: null,
     model: null,
@@ -58,12 +57,6 @@ export function useStatus(workspacePath: string, data?: DataAccess): Status {
   // faster one for the current workspace.
   const generation = useRef(0);
 
-  // `data` arrives from the host and may be a fresh object on every render.
-  // Holding it in a ref keeps it out of the effect dependency lists: an
-  // identity change must not tear down the subscriptions.
-  const dataRef = useRef(data);
-  dataRef.current = data;
-
   const refresh = useCallback(async () => {
     // Still clear `loading` with no workspace, or the panel renders its
     // placeholder forever and the config chip stays unreachable.
@@ -74,7 +67,7 @@ export function useStatus(workspacePath: string, data?: DataAccess): Status {
     const current = ++generation.current;
 
     const [session, models, defaultEffort, permissionMode, git, usage] = await Promise.all([
-      getFocusedSession(workspacePath, dataRef.current),
+      getFocusedSession(workspacePath),
       getModels(),
       getDefaultEffortLevel(),
       getPermissionMode(workspacePath),

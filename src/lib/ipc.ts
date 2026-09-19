@@ -130,68 +130,17 @@ export interface ModelInfo {
  * read, so "focused" is approximated by "most recently updated in this
  * workspace" -- the session you are talking to is the one being written to.
  * Re-queried whenever the app broadcasts a session update.
+ *
+ * This used to prefer a raw `SELECT` against `ai_sessions` via the
+ * `nimbalyst-database-read` catalog permission, with the IPC channels as a
+ * fallback. Both are gone: the permission is risk tier HIGH, so every install
+ * had to clear a consent prompt, and the SQL bound the panel to an internal
+ * schema carrying no compatibility promise. GET-85 established that
+ * `sessions:list` plus `sessions:get` answer the same question, so the fallback
+ * is now the only path.
  */
-export interface DataAccess {
-  query: (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
-}
-
-/** SQLite string literal: the only escaping needed is doubling single quotes. */
-function quote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-export async function getFocusedSession(
-  workspacePath: string,
-  data?: DataAccess,
-): Promise<SessionRecord | null> {
-  const fromDatabase = await queryFocusedSession(workspacePath, data);
-  if (fromDatabase) return fromDatabase;
+export async function getFocusedSession(workspacePath: string): Promise<SessionRecord | null> {
   return listFocusedSession(workspacePath);
-}
-
-/**
- * Preferred path: ask the database directly.
- *
- * `sessions:list` does not return a flat newest-first list of conversations --
- * it surfaced a workstream root with zero messages as "newest" -- and its
- * entries carry no metadata, so token usage was unreachable. One query settles
- * both: the most recently updated session in this workspace that actually has
- * messages, metadata included.
- *
- * Parameters are inlined because the placeholder dialect differs across the
- * app's stores; the only interpolated value is a local workspace path.
- */
-async function queryFocusedSession(
-  workspacePath: string,
-  data?: DataAccess,
-): Promise<SessionRecord | null> {
-  if (!data?.query) return null;
-
-  const sql = `
-    SELECT s.id, s.title, s.model, s.provider, s.metadata, s.updated_at
-    FROM ai_sessions s
-    WHERE s.workspace_id = ${quote(workspacePath)}
-      AND EXISTS (SELECT 1 FROM ai_agent_messages m WHERE m.session_id = s.id)
-    ORDER BY s.updated_at DESC
-    LIMIT 1`;
-
-  try {
-    const rows = await data.query(sql);
-    const row = rows?.[0];
-    if (!row) return null;
-
-    return {
-      id: String(row.id),
-      title: row.title as string | undefined,
-      model: row.model as string | undefined,
-      provider: row.provider as string | undefined,
-      updatedAt: row.updated_at as string | undefined,
-      metadata: parseMetadata(row.metadata as string | undefined),
-    };
-  } catch (error) {
-    console.warn('[status-panel] session query failed, falling back to sessions:list:', error);
-    return null;
-  }
 }
 
 /**
@@ -202,8 +151,6 @@ async function queryFocusedSession(
 const MAX_CANDIDATES = 8;
 
 /**
- * Fallback when database access is unavailable.
- *
  * `sessions:list` is a poor oracle on its own, in two ways that both have to be
  * worked around here:
  *

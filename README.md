@@ -114,7 +114,7 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 
 1. ~~**Cross-platform usage fetch.**~~ Done — nothing is exec'd, so there is no command left to make portable.
 2. ~~**Stop depending on `~/.claude/get-plan-usage.ps1`.**~~ Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
-3. **Harden the database dependency.** `nimbalyst-database-read` plus raw SQL against `ai_sessions` is coupled to an internal schema that can change between releases. Keep the `sessions:list` fallback genuinely working, and fail soft if the query throws.
+3. ~~**Harden the database dependency.**~~ Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
 4. **Non-Claude providers.** Sessions on Codex/Copilot/Cursor render a sparse strip. Decide between hiding irrelevant chips and showing honest placeholders.
 5. **Packaging.** Add the `marketplace` block (categories, tags, icon, tagline, longDescription, highlights, screenshots — see `resources/extensions/git/manifest.json`), a license, a repo link, and a real version.
 
