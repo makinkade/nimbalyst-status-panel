@@ -4,6 +4,19 @@ A Nimbalyst bottom panel that mirrors the Claude Code CLI status line (`~/.claud
 
 **Status:** implemented and building. Not yet installed into Nimbalyst or verified live — see [Install](#install).
 
+## Claude Code only
+
+v1 is built for Claude Code sessions, and that is a deliberate limit rather than an oversight — per-provider behaviour is deferred. Install it expecting Claude; do not install it expecting Copilot, Cursor or Codex support.
+
+What that means on a session from another provider:
+
+- **Model** — the chip matches the session's model id against the whole model catalog, so a non-Claude model usually still resolves to a name. When it does not, the fallback in `src/lib/modelNames.ts` only knows `claude-code:` ids, and the raw id is shown instead.
+- **5h / 7d / scoped caps** — these read Anthropic's plan-usage endpoint with your Claude OAuth token. They report *your Claude plan*, not the focused session, so alongside a Copilot session they are unrelated numbers.
+- **Effort, permission mode, directory, branch** — provider-neutral; these work the same either way.
+- **Context** — comes from the session's own `metadata.tokenUsage`, so it populates for any provider that records it and reads `Context —` otherwise.
+
+Turning the usage chips off in the gear popover is the practical workaround until per-provider behaviour is decided.
+
 ## Why a panel
 
 Nimbalyst's Agent toolbar is a fixed React component — the `Context Breakdown` chip is `data-testid="context-indicator"`, not a pluggable slot. The extension manifest offers no toolbar or status-bar contribution point. `contributions.panels` is the supported surface for custom UI, so the status line becomes a bottom panel: `Ctrl+Shift+S`, or `Ctrl+J` and pick the tab.
@@ -112,10 +125,10 @@ Iterate with `extension_reload({ extensionId, path })`.
 
 Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 built-ins plus Astro, Electronics Studio, Jupyter, Mindmap, Namenym, Replicad and Slides, none of which surface session state. Publishing would mean closing these gaps, all of which exist because this was built for one machine:
 
-1. ~~**Cross-platform usage fetch.**~~ Done — nothing is exec'd, so there is no command left to make portable.
-2. ~~**Stop depending on `~/.claude/get-plan-usage.ps1`.**~~ Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
-3. ~~**Harden the database dependency.**~~ Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
-4. **Non-Claude providers.** Sessions on Codex/Copilot/Cursor render a sparse strip. Decide between hiding irrelevant chips and showing honest placeholders.
+1. **~~Cross-platform usage fetch.~~** Done — nothing is exec'd, so there is no command left to make portable.
+2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
+3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
+4. **Non-Claude providers.** Deferred for v1 and documented instead — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. Sessions on Codex/Copilot/Cursor render a strip whose usage chips are about the Claude plan rather than that session. Still to decide: hide the irrelevant chips or show honest placeholders.
 5. **Packaging.** Add the `marketplace` block (categories, tags, icon, tagline, longDescription, highlights, screenshots — see `resources/extensions/git/manifest.json`), a license, a repo link, and a real version.
 
 Publishing route is unconfirmed: the app only consumes the registry, with no in-app submit path. Start at `docs.nimbalyst.com/extensions`. (The `marketplace.json` constant in the app bundle points at `anthropics/claude-plugins-official` — that is Claude plugins, a different system.)
