@@ -194,20 +194,73 @@ async function queryFocusedSession(
   }
 }
 
-/** Fallback when database access is unavailable: newest entry that has messages. */
+/**
+ * How many list entries are worth resolving individually when the newest one
+ * turns out to be a workstream root. Bounded because each costs a `sessions:get`
+ * and the panel refreshes every five seconds.
+ */
+const MAX_CANDIDATES = 8;
+
+/**
+ * Fallback when database access is unavailable.
+ *
+ * `sessions:list` is a poor oracle on its own, in two ways that both have to be
+ * worked around here:
+ *
+ * - `messageCount` is **always 0**. The store's list query does not join the
+ *   messages table ("Not computed in list query for performance"), and the
+ *   handler's projection passes that zero straight through. Screening on it
+ *   therefore discards every session rather than just the empty ones.
+ * - `updatedAt` is not the session's own. The list orders by
+ *   `GREATEST(s.updated_at, MAX(child.updated_at))` and reports that same
+ *   bubbled value, so a workstream root floats to the top on its children's
+ *   activity -- which is exactly how a root with no conversation in it came to
+ *   look like the newest session.
+ *
+ * `sessions:get` has neither problem: it returns the row itself, so `updatedAt`
+ * is the session's own and `metadata` is the parsed object holding `tokenUsage`.
+ * So the list is used only to enumerate candidates, and the pick is made from
+ * full records.
+ *
+ * A leaf's bubbled timestamp equals its own, so when the newest entry has no
+ * children nothing can have overtaken it and one `sessions:get` settles it.
+ * Only when a parent is in front do we resolve the rest.
+ */
 async function listFocusedSession(workspacePath: string): Promise<SessionRecord | null> {
   const listed = await invoke<unknown>('sessions:list', workspacePath, { limit: 50 });
-  const entries = normalizeSessionList(listed).filter(
-    (entry) => (entry as { messageCount?: number }).messageCount !== 0,
-  );
+  const entries = normalizeSessionList(listed);
   if (entries.length === 0) return null;
 
-  const newest = entries.reduce((best, entry) =>
-    timestamp(entry.updatedAt) > timestamp(best.updatedAt) ? entry : best,
-  );
+  if (!hasChildren(entries[0])) return resolveSession(entries[0]);
 
-  const full = await invoke<{ success?: boolean; session?: SessionRecord }>('sessions:get', newest.id);
-  const session = full?.session ?? newest;
+  const resolved = (
+    await Promise.all(entries.slice(0, MAX_CANDIDATES).map((entry) => resolveSession(entry)))
+  ).filter((session): session is SessionRecord => session !== null);
+  if (resolved.length === 0) return null;
+
+  // Token usage is the only "has actually been talked to" signal that survives
+  // IPC -- a workstream root that exists just to hold children has none.
+  const conversed = resolved.filter((session) => extractTokenUsage(session) !== null);
+  const pool = conversed.length > 0 ? conversed : resolved;
+
+  return pool.reduce((best, session) =>
+    timestamp(session.updatedAt) > timestamp(best.updatedAt) ? session : best,
+  );
+}
+
+/** List entries report a real `childCount`, unlike `messageCount`. */
+function hasChildren(entry: SessionRecord): boolean {
+  const count = (entry as unknown as { childCount?: number }).childCount;
+  return typeof count === 'number' && count > 0;
+}
+
+/** Trade a list entry for the full record, keeping the entry if the call fails. */
+async function resolveSession(entry: SessionRecord): Promise<SessionRecord | null> {
+  const full = await invoke<{ success?: boolean; session?: SessionRecord }>(
+    'sessions:get',
+    entry.id,
+  );
+  const session = full?.session ?? entry;
   return { ...session, metadata: parseMetadata(session.metadata) };
 }
 
