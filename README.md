@@ -96,6 +96,7 @@ Requires Extension Dev Tools (Settings → Advanced). **The `extension_*` MCP to
 ```
 npm install
 npm run build        # -> dist/index.js, dist/index.css
+npm test             # cache, throttle and staleness discipline in the usage client
 ```
 
 Then from a session that has the dev tools:

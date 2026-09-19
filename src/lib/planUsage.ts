@@ -102,10 +102,19 @@ export async function fetchPlanUsage(): Promise<PlanUsage | null> {
   if (inFlight) return inFlight;
   if (Date.now() - lastFinishedAt < MIN_INTERVAL_MS) return lastResult;
 
-  inFlight = runPlanUsage().finally(() => {
-    inFlight = null;
-    lastFinishedAt = Date.now();
-  });
+  inFlight = runPlanUsage()
+    // A throw would reject every caller sharing this promise, and the panel
+    // polls with `void`, so it would land as an unhandled rejection rather than
+    // a chip. "Stale is better than nothing" has to cover bugs as well as
+    // outages: fall back to the last reading and let it render as stale.
+    .catch((error) => {
+      console.debug('[status-panel] plan usage failed:', error);
+      return lastResult;
+    })
+    .finally(() => {
+      inFlight = null;
+      lastFinishedAt = Date.now();
+    });
 
   lastResult = await inFlight;
   return lastResult;
