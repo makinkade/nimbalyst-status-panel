@@ -16,7 +16,7 @@ import {
   on,
   onWindowEvent,
 } from './lib/ipc';
-import { ExecFn, PlanUsage, fetchPlanUsage } from './lib/planUsage';
+import { PlanUsage, fetchPlanUsage } from './lib/planUsage';
 
 export interface Status {
   session: SessionRecord | null;
@@ -27,21 +27,21 @@ export interface Status {
   git: GitInfo;
   /** Preferred: full parity with the CLI status line, including scoped caps. */
   planUsage: PlanUsage | null;
-  /** Fallback when the helper script is unavailable. */
+  /** Fallback when there is no token, or the usage endpoint will not answer. */
   usage: ClaudeUsage | null;
   loading: boolean;
 }
 
 const EMPTY_GIT: GitInfo = { repoPath: null, branch: null, dirtyCount: 0 };
 const POLL_MS = 5_000;
-/** The helper self-caches for 60 s; spawning PowerShell faster buys nothing. */
+/** The cache shared with the CLI status line has a 60 s TTL; asking faster buys nothing. */
 const PLAN_USAGE_POLL_MS = 60_000;
 
 /**
  * Event subscriptions drive the refresh; the timer is the backstop for the
  * values nothing broadcasts (git branch, effort, permission mode).
  */
-export function useStatus(workspacePath: string, exec?: ExecFn, data?: DataAccess): Status {
+export function useStatus(workspacePath: string, data?: DataAccess): Status {
   const [status, setStatus] = useState<Status>({
     session: null,
     model: null,
@@ -58,13 +58,10 @@ export function useStatus(workspacePath: string, exec?: ExecFn, data?: DataAcces
   // faster one for the current workspace.
   const generation = useRef(0);
 
-  // `exec` and `data` arrive from the host and may be fresh objects on every
-  // render. Holding them in refs keeps them out of the effect dependency
-  // lists: an identity change must not tear down the subscriptions or -- far
-  // worse -- re-fire the plan-usage fetch, which spawns a PowerShell process.
-  const execRef = useRef(exec);
+  // `data` arrives from the host and may be a fresh object on every render.
+  // Holding it in a ref keeps it out of the effect dependency lists: an
+  // identity change must not tear down the subscriptions.
   const dataRef = useRef(data);
-  execRef.current = exec;
   dataRef.current = data;
 
   const refresh = useCallback(async () => {
@@ -109,7 +106,7 @@ export function useStatus(workspacePath: string, exec?: ExecFn, data?: DataAcces
   }, [workspacePath]);
 
   const refreshPlanUsage = useCallback(async () => {
-    const planUsage = await fetchPlanUsage(execRef.current);
+    const planUsage = await fetchPlanUsage();
     if (planUsage) setStatus((previous) => ({ ...previous, planUsage }));
   }, []);
 

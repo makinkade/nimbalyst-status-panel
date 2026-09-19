@@ -55,7 +55,7 @@ src/
   segments.ts         # segment registry, default order, config reconciliation
   useSegmentConfig.ts # load/save config via host.storage global scope
   lib/ipc.ts          # typed, failure-tolerant wrapper over electronAPI
-  lib/planUsage.ts    # runs ~/.claude/get-plan-usage.ps1 via host.exec
+  lib/planUsage.ts    # reads the credentials file and calls the usage API directly
   lib/format.ts       # formatTokens / formatResetTime / labels, ported from the .ps1
   lib/thresholds.ts   # Night Owl palette + bar thresholds, ported from the .ps1
 ```
@@ -70,19 +70,22 @@ src/
 | Permission mode | `app-settings:get("agentPermissionMode")`, falling back to `workspace:get-state` |
 | Branch / dirty | `git:is-repo`, `git:branches`, `git:get-uncommitted-files` |
 | Tokens | `session.metadata.tokenUsage` |
-| Plan usage | `~/.claude/get-plan-usage.ps1` via `host.exec`, falling back to `claude-usage:get()` |
+| Plan usage | `api.anthropic.com/api/oauth/usage`, falling back to `claude-usage:get()` |
 
-### Plan usage and the shared script
+### Plan usage
 
-`claude-usage:get` maps only `five_hour`, `seven_day`, and `seven_day_opus` — the API's `limits[]` array, which carries model-scoped caps like `7d Fable`, never reaches the renderer. Since that is the cap most likely to bite, the panel runs the same code the status line does instead.
+`claude-usage:get` maps only `five_hour`, `seven_day`, and `seven_day_opus` — the API's `limits[]` array, which carries model-scoped caps like `7d Fable`, never reaches the renderer. Since that is the cap most likely to bite, the panel calls the usage endpoint itself.
 
-`Get-PlanUsage` was extracted from `statusline.ps1` into `~/.claude/get-plan-usage.ps1`:
+`src/lib/planUsage.ts` reads the OAuth token from `.credentials.json`, `GET`s `https://api.anthropic.com/api/oauth/usage` with `anthropic-beta: oauth-2025-04-20`, and shapes the response the way `~/.claude/get-plan-usage.ps1` does — including `allLimits`, the diagnostic record of every entry in `limits[]`. Nothing is spawned; both files are reached through `read-global-claude-file` / `write-global-claude-file`, which resolve the Claude config directory host-side and honour `CLAUDE_CONFIG_DIR`. `permissions.filesystem` is still required, because that is what gates reading the credentials file.
 
-- `statusline.ps1` dot-sources it (`. "$env:USERPROFILE\.claude\get-plan-usage.ps1"`) and is otherwise unchanged
-- run as a script, it prints the same object as compact JSON on stdout
-- both callers share `statusline-usage-cache.json` and its 60 s TTL, so whichever renders first pays for the API call
+`statusline.ps1` still dot-sources `get-plan-usage.ps1`, and the panel still shares `statusline-usage-cache.json` with it, so whichever renders first pays for the API call. Sharing that file means honouring its discipline in both directions:
 
-The panel invokes it through `host.exec` every 60 s. `extension:exec` is gated only on `permissions.filesystem`, which this extension declares. `claude-usage:get` remains the fallback if the script is missing or fails, in which case the scoped bars are simply absent.
+- **60 s TTL** — a cache younger than that is returned as-is, so the panel and the status line do not double-fetch.
+- **Atomic writes** — a temp file per renderer, then a rename. `write-global-claude-file` truncates before writing, so writing the cache path directly is what used to leave it at zero bytes.
+- **Tolerant reads** — empty, truncated, or unparseable is treated as absent. Note the reader must `trim()` before `JSON.parse`: Windows PowerShell writes a UTF-8 BOM, which `JSON.parse` rejects outright.
+- **Local timestamps** — written as `2026-09-18T17:56:57.983-04:00`, not `toISOString()`. `ConvertFrom-Json` coerces the field to a `[DateTime]`, and a trailing `Z` comes back `Kind=Utc`, which the status line's age expression re-reads as a local wall clock; the age goes negative, `-lt 60` holds, and the CLI serves that reading as fresh for hours.
+
+Failures are quiet by design — no credentials, unreadable file, network error, 401, 429 — and fall back to the last cached reading, whose older timestamp is what makes the chips render as stale. `claude-usage:get` remains the fallback when there is no reading at all, in which case the scoped bars are simply absent.
 
 Formatting, thresholds, and the palette are ported verbatim so a bar that is red in the terminal is red here.
 
@@ -108,8 +111,8 @@ Iterate with `extension_reload({ extensionId, path })`.
 
 Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 built-ins plus Astro, Electronics Studio, Jupyter, Mindmap, Namenym, Replicad and Slides, none of which surface session state. Publishing would mean closing these gaps, all of which exist because this was built for one machine:
 
-1. **Cross-platform usage fetch.** The exec command is Windows-only (`powershell`, cmd-style `%USERPROFILE%`). Needs a shell equivalent for macOS/Linux, chosen at runtime.
-2. **Stop depending on `~/.claude/get-plan-usage.ps1`.** That file exists because it was extracted from this machine's status line. A published build must ship the logic itself, or document that scoped caps only appear when the helper is present. The `claude-usage:get` fallback already degrades cleanly (5h / 7d / 7d-Opus, no scoped caps).
+1. ~~**Cross-platform usage fetch.**~~ Done — nothing is exec'd, so there is no command left to make portable.
+2. ~~**Stop depending on `~/.claude/get-plan-usage.ps1`.**~~ Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **Harden the database dependency.** `nimbalyst-database-read` plus raw SQL against `ai_sessions` is coupled to an internal schema that can change between releases. Keep the `sessions:list` fallback genuinely working, and fail soft if the query throws.
 4. **Non-Claude providers.** Sessions on Codex/Copilot/Cursor render a sparse strip. Decide between hiding irrelevant chips and showing honest placeholders.
 5. **Packaging.** Add the `marketplace` block (categories, tags, icon, tagline, longDescription, highlights, screenshots — see `resources/extensions/git/manifest.json`), a license, a repo link, and a real version.
@@ -124,7 +127,7 @@ Nothing below has been exercised against a running instance yet.
 - [ ] Model, effort, permission mode, directory, branch populate
 - [ ] Context bar tracks a live session (the one source not yet confirmed — if `metadata.tokenUsage` lags, fall back to parsing the session JSONL as the script does)
 - [ ] Usage bars show plausible percentages and reset stamps, including the scoped `7d Fable` bar
-- [x] `get-plan-usage.ps1` runs standalone (emits JSON) and dot-sources silently
+- [x] Usage endpoint reachable from the renderer, credentials read, cache written atomically and read back by `Get-PlanUsage`
 - [x] `statusline.ps1` still renders correctly after the extraction
 - [ ] Light and dark themes both legible
 - [ ] Empty states: no session, not a git repo, usage unavailable offline

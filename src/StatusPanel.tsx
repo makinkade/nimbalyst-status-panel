@@ -1,4 +1,4 @@
-import { Fragment, ReactNode, useMemo } from 'react';
+import { Fragment, ReactNode } from 'react';
 import { Bar, Chip } from './components/Chip';
 import { ConfigChip } from './components/ConfigChip';
 import {
@@ -12,7 +12,6 @@ import {
 import { DataAccess, EffortSource, extractTokenUsage } from './lib/ipc';
 import { friendlyModelName } from './lib/modelNames';
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
-import { ExecFn } from './lib/planUsage';
 import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
 import { SegmentId } from './segments';
 import { PanelStorage, useSegmentConfig } from './useSegmentConfig';
@@ -22,15 +21,14 @@ import './styles.css';
 interface PanelHost {
   workspacePath: string;
   getPrimaryFolderPath: () => string;
-  exec?: ExecFn;
   storage?: PanelStorage;
   data?: DataAccess;
 }
 
 /**
- * The helper self-caches for 60s and the panel polls it every 60s, so a reading
- * older than this means the fetch itself is failing -- almost always because
- * the usage API is rate-limiting, which it does exactly when you are near a cap.
+ * The cache holds for 60s and the panel refreshes every 60s, so a reading older
+ * than this means the fetch itself is failing -- almost always because the
+ * usage API is rate-limiting, which it does exactly when you are near a cap.
  */
 const USAGE_STALE_AFTER_MS = 5 * 60_000;
 
@@ -46,11 +44,7 @@ interface UsageBar {
 
 export function StatusPanel({ host }: { host: PanelHost }) {
   const workspacePath = host.getPrimaryFolderPath?.() ?? host.workspacePath;
-  // `.bind()` returns a new function every call, so binding inline made the
-  // plan-usage effect re-run on every render -- each one spawning a shell to
-  // run get-plan-usage.ps1.
-  const exec = useMemo(() => host.exec?.bind(host), [host]);
-  const status = useStatus(workspacePath, exec, host.data);
+  const status = useStatus(workspacePath, host.data);
   const { config, update, reset } = useSegmentConfig(host.storage);
 
   // Name the scoped-caps row after the caps actually in force, so the config
@@ -106,7 +100,7 @@ function buildSegments(status: Status, workspacePath: string): Record<SegmentId,
   const contextPercent =
     contextTokens && contextWindow ? Math.min((contextTokens / contextWindow) * 100, 100) : null;
 
-  // Repo root name when in a git repo, else the folder name -- as in the script.
+  // Repo root name when in a git repo, else the folder name -- as in the status line.
   const displayPath = folderName(git.repoPath ?? workspacePath);
   const bars = buildUsageBars(planUsage, usage);
 
@@ -204,7 +198,7 @@ function buildSegments(status: Status, workspacePath: string): Record<SegmentId,
       bars.scoped.map((bar) => <UsageChip key={bar.key} bar={bar} />)
     ) : (
       // An empty `limits[]` is the API saying there are no model-scoped caps
-      // right now -- distinct from the helper script being unavailable, which
+      // right now -- distinct from the usage endpoint being unreachable, which
       // is the case worth flagging.
       <Chip
         icon="speed"
@@ -212,7 +206,7 @@ function buildSegments(status: Status, workspacePath: string): Record<SegmentId,
         title={
           planUsage
             ? 'No model-scoped caps in the usage API right now'
-            : 'get-plan-usage.ps1 unavailable; claude-usage:get does not expose scoped caps'
+            : 'Usage endpoint unreachable; claude-usage:get does not expose scoped caps'
         }
       >
         <span className="sp-label">{planUsage ? 'No scoped caps' : 'Scoped —'}</span>
@@ -252,8 +246,8 @@ function renderBar(bar: UsageBar | null): ReactNode {
 }
 
 /**
- * The helper script is authoritative when present: it carries the scoped model
- * caps (e.g. `7d Fable`) that `claude-usage:get` drops.
+ * The usage endpoint is authoritative when it answers: it carries the scoped
+ * model caps (e.g. `7d Fable`) that `claude-usage:get` drops.
  */
 function buildUsageBars(
   planUsage: Status['planUsage'],
