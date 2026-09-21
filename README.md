@@ -15,6 +15,8 @@ What that means on a session from another provider:
 - **Effort, permission mode, directory, branch** — provider-neutral; these work the same either way.
 - **Context** — comes from the session's own `metadata.tokenUsage`, so it populates for any provider that records it and reads `Context —` otherwise.
 
+Codex is the case where that last point bites hardest: Nimbalyst never writes `metadata.tokenUsage` for `provider = 'openai-codex'` at all — its own analytics reconstructs Codex token counts from `ai_agent_messages` instead — so the Context chip reads `Context —` for the life of the session rather than only until the first turn. It also means the "has actually been talked to" tiebreak in `listFocusedSession`, which prefers candidates with token usage, can never pick a Codex session; when a workstream root is at the top of `sessions:list`, the panel will describe an older Claude session instead. Neither is an error, but both are worth knowing before the chips are made per-provider.
+
 Turning the usage chips off in the gear popover is the practical workaround until per-provider behaviour is decided.
 
 ## Why a panel
@@ -145,3 +147,5 @@ Nothing below has been exercised against a running instance yet.
 - [x] `statusline.ps1` still renders correctly after the extraction
 - [ ] Light and dark themes both legible
 - [ ] Empty states: no session, not a git repo, usage unavailable offline
+- [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
+- [ ] The same strip seen on screen in the running panel, with a Codex session resolved as the focused one

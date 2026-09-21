@@ -88,7 +88,8 @@ export function StatusPanel({ host }: { host: PanelHost }) {
   );
 }
 
-function buildSegments(status: Status, workspacePath: string): Record<SegmentId, ReactNode> {
+/** Exported for the segment tests, which render the strip without a DOM. */
+export function buildSegments(status: Status, workspacePath: string): Record<SegmentId, ReactNode> {
   const { session, model, effort, effortSource, permissionMode, git, planUsage, usage } = status;
 
   const tokens = extractTokenUsage(session);
