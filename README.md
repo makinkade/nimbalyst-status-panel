@@ -15,7 +15,12 @@ What that means on a session from another provider:
 - **Effort, permission mode, directory, branch** — provider-neutral; these work the same either way.
 - **Context** — comes from the session's own `metadata.tokenUsage`, so it populates for any provider that records it and reads `Context —` otherwise.
 
-Codex is the case where that last point bites hardest: Nimbalyst never writes `metadata.tokenUsage` for `provider = 'openai-codex'` at all — its own analytics reconstructs Codex token counts from `ai_agent_messages` instead — so the Context chip reads `Context —` for the life of the session rather than only until the first turn. It also means the "has actually been talked to" tiebreak in `listFocusedSession`, which prefers candidates with token usage, can never pick a Codex session; when a workstream root is at the top of `sessions:list`, the panel will describe an older Claude session instead. Neither is an error, but both are worth knowing before the chips are made per-provider.
+Confirmed on screen against a live `openai-codex` session (GET-89): every chip renders, the model reads as the raw `openai-codex:gpt-5.6-luna`, and the Context bar is fully populated at `15% ↑38.3K ↓35`. Nimbalyst writes `metadata.tokenUsage` with `currentContext` for Codex exactly as it does for Claude Code, so Context is not a per-provider gap — it is empty only until a session has been prompted once, which is true of any provider.
+
+Two rough edges did show up there, and both are about *which* session the strip describes and *whose* limits it reports:
+
+- **The strip follows the most recently updated session, not the one you are looking at.** Switching to a Codex session in the UI does not move the chips; prompting it does. `metadata.metadata.lastReadAt` is the signal that would fix this — `setActiveSessionAtom` calls `markSessionReadAtom` unconditionally on every active-session change, which persists `lastReadAt` through `ai:updateSessionMetadata` and broadcasts the `sessions:session-updated` the panel already listens for. Ranking candidates by `lastReadAt`, falling back to `updatedAt`, would track the visible session without needing the renderer atom `session:get-active` refuses to expose.
+- **The 5h / 7d / scoped bars keep reporting the Claude plan** next to a session that has nothing to do with it, with no visual hint that they are unrelated.
 
 Turning the usage chips off in the gear popover is the practical workaround until per-provider behaviour is decided.
 
@@ -148,4 +153,4 @@ Nothing below has been exercised against a running instance yet.
 - [ ] Light and dark themes both legible
 - [ ] Empty states: no session, not a git repo, usage unavailable offline
 - [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
-- [ ] The same strip seen on screen in the running panel, with a Codex session resolved as the focused one
+- [x] The same strip seen on screen in the running panel, with a `gpt-5.6-luna` Codex session resolved (GET-89)
