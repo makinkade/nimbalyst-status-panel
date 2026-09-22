@@ -167,13 +167,21 @@ No `src/`, no `node_modules/`, and no `.js.map` — a source map inlines the ful
 
 `scripts/package.mjs` builds the archive with **adm-zip**, which is the same library `extractNimext` uses to unpack it, then re-opens the result and re-runs the installer's own checks — top-level `manifest.json` that parses and has the right `id`, `manifest.main`/`manifest.styles` actually present, no entry that escapes the destination directory. A release carrying a *broken* asset is a hard install failure that does **not** fall back to the clone path, so a malformed package is worse than no package; it is worth failing in the build rather than on someone's machine.
 
+### Published identity
+
+Settled in GET-93 and not worth re-deciding:
+
+- **`author`** is `Mark Kinkade` — the same name as the LICENSE copyright line. The registry and the extension card show this string verbatim, so it is the public byline; the earlier `mkinkade` was a placeholder that did not even match the GitHub owner.
+- **`id`** stays `com.mkinkade.status-panel`. `checkForUpdates()` matches an install to a registry entry on id alone, so a `com.nimbalyst.*` id would invite a first-party registry build to overwrite this GitHub install on startup.
+- **`minimumAppVersion` is not a manifest field.** The registry generator derives it as `manifest.apiVersion || '1.0.0'`, so `apiVersion: "1.0.0"` — already declared — is the field that decides it. It is also never enforced: nothing compares it against the running app version, and on the GitHub install path no registry entry exists at all. Treat it as advisory metadata. A real minimum-version guard would have to be a runtime check in the panel.
+
 ### Cutting a release
 
 `.github/workflows/release.yml` runs on any `v*` tag: `npm ci`, version check, `npm test`, `npm run package`, then `gh release create` with both artifacts attached.
 
 ```
-git tag v0.1.0        # must match manifest.json "version"
-git push origin v0.1.0
+git tag v0.1.1        # must match manifest.json "version"
+git push origin v0.1.1
 ```
 
 **The tag and the manifest version have to agree.** The app's update check compares a release's `tag_name` against the installed manifest version, so drift there silently breaks update detection for anyone already installed. Three copies exist — the tag, `manifest.json`, and `package.json` — and both the workflow and `npm run package` refuse to proceed when they disagree, so bump all three together.
@@ -190,7 +198,7 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
 4. **Non-Claude providers.** Deferred for v1 and documented instead — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. Sessions on Codex/Copilot/Cursor render a strip whose usage chips are about the Claude plan rather than that session. Still to decide: hide the irrelevant chips or show honest placeholders.
-5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only) and a real version (GET-93). `screenshots/` is already in the packaging script's file list, so it will ship as soon as the PNGs land.
+5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). ~~Version and author identity~~ are done too (GET-93) — see [Published identity](#published-identity). Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only). `screenshots/` is already in the packaging script's file list, so it will ship as soon as the PNGs land.
 
 Publishing route is settled: **the registry is first-party only.** Every live entry is authored by Nimbalyst under `com.nimbalyst.*`, and `registry.json` is a generated artifact pushed to Nimbalyst's own R2 bucket rather than a file anyone can PR — being listed means a maintainer adds a local path to `packages/marketplace/release-extensions.txt`, which is a favour rather than a process. The docs' offer to "publish an extension you built yourself" has no workflow behind it.
 
