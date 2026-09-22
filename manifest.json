@@ -30,6 +30,7 @@
       "Gear chip choosing which segments appear and in what order, remembered across workspaces",
       "Keyboard shortcut (Ctrl+Shift+S) for quick access"
     ],
+    "repositoryUrl": "https://github.com/makinkade/nimbalyst-status-panel",
     "changelog": "0.1.0: First release. Chip strip for the focused session with model, effort, permission mode, directory, branch, context usage and Claude plan limits, plus a configurable segment order. Claude Code sessions only."
   },
   "permissions": {
