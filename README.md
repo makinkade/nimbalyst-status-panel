@@ -123,7 +123,7 @@ https://github.com/makinkade/nimbalyst-status-panel
 
 Nimbalyst resolves `/releases/latest`, downloads the `.nimext` asset and extracts it to `~/.nimbalyst/extensions/com.mkinkade.status-panel/`. Re-pasting the same URL upgrades in place — there is no uninstall step.
 
-**This path needs a published release, and fails rather than degrading without one.** With no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`; `dist/` is deliberately gitignored here, so the clone path reports *"Extension repository does not include a built dist/ directory."* Until the first tagged release, build from source.
+**This path needs a published release, and fails rather than degrading without one.** With no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`; `dist/` is deliberately gitignored here, so the clone path reports *"Extension repository does not include a built dist/ directory."* Until the first tag is pushed there is no release to resolve, so build [from source](#from-source) — see [Releasing](#releasing) for what publishing one involves.
 
 ### From source
 
@@ -146,6 +146,42 @@ extension_get_status({ extensionId: "com.mkinkade.status-panel" })
 
 Iterate with `extension_reload({ extensionId, path })` — though a reload does not reliably remount an already-mounted panel, so restart Nimbalyst when a change does not show up.
 
+## Releasing
+
+```
+npm run package          # clean build -> build/status-panel-<version>.nimext + .sha256
+npm run package -- --no-build   # package the dist/ already on disk
+```
+
+A `.nimext` is a zip Nimbalyst extracts straight into `~/.nimbalyst/extensions/{id}/`, so `manifest.json` has to be at the **top level** of the archive rather than one directory deep. What ships:
+
+```
+manifest.json
+dist/index.js
+dist/index.css
+README.md
+LICENSE
+```
+
+No `src/`, no `node_modules/`, and no `.js.map` — a source map inlines the full text of `src/` through `sourcesContent`, which is the one thing the marketplace review checklist asks packages not to carry. The repo is public, so debugging means building locally.
+
+`scripts/package.mjs` builds the archive with **adm-zip**, which is the same library `extractNimext` uses to unpack it, then re-opens the result and re-runs the installer's own checks — top-level `manifest.json` that parses and has the right `id`, `manifest.main`/`manifest.styles` actually present, no entry that escapes the destination directory. A release carrying a *broken* asset is a hard install failure that does **not** fall back to the clone path, so a malformed package is worse than no package; it is worth failing in the build rather than on someone's machine.
+
+### Cutting a release
+
+`.github/workflows/release.yml` runs on any `v*` tag: `npm ci`, version check, `npm test`, `npm run package`, then `gh release create` with both artifacts attached.
+
+```
+git tag v0.1.0        # must match manifest.json "version"
+git push origin v0.1.0
+```
+
+**The tag and the manifest version have to agree.** The app's update check compares a release's `tag_name` against the installed manifest version, so drift there silently breaks update detection for anyone already installed. Three copies exist — the tag, `manifest.json`, and `package.json` — and both the workflow and `npm run package` refuse to proceed when they disagree, so bump all three together.
+
+The release is published with `--latest`, because the installer asks for `/releases/latest` specifically rather than for a tag.
+
+The `.sha256` is emitted alongside for form's sake. Nothing on the GitHub path consumes it — installs from a repo URL record `checksum: ''` — but `installFromUrl` does verify a checksum when the registry supplies one, so the discipline is worth keeping.
+
 ## Marketplace readiness (backlog)
 
 Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 built-ins plus Astro, Electronics Studio, Jupyter, Mindmap, Namenym, Replicad and Slides, none of which surface session state. Publishing would mean closing these gaps, all of which exist because this was built for one machine:
@@ -154,7 +190,7 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
 4. **Non-Claude providers.** Deferred for v1 and documented instead — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. Sessions on Codex/Copilot/Cursor render a strip whose usage chips are about the Claude plan rather than that session. Still to decide: hide the irrelevant chips or show honest placeholders.
-5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only) and a real version (GET-93).
+5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only) and a real version (GET-93). `screenshots/` is already in the packaging script's file list, so it will ship as soon as the PNGs land.
 
 Publishing route is settled: **the registry is first-party only.** Every live entry is authored by Nimbalyst under `com.nimbalyst.*`, and `registry.json` is a generated artifact pushed to Nimbalyst's own R2 bucket rather than a file anyone can PR — being listed means a maintainer adds a local path to `packages/marketplace/release-extensions.txt`, which is a favour rather than a process. The docs' offer to "publish an extension you built yourself" has no workflow behind it.
 
@@ -174,6 +210,8 @@ Nothing below has been exercised against a running instance yet.
 - [ ] Empty states: no session, not a git repo, usage unavailable offline
 - [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
 - [x] The same strip seen on screen in the running panel, with a `gpt-5.6-luna` Codex session resolved (GET-89)
+- [x] `npm run package` produces an archive whose top-level `manifest.json` parses under an independent zip reader, with no `src/` or source maps in it
+- [ ] That archive installs on a clean machine by pasting the repo URL — Windows (GET-95) and macOS/Linux (GET-96). Not exercised: no tag has been pushed, so there is no release to resolve yet
 
 ## License
 

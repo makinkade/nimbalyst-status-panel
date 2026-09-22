@@ -1,0 +1,65 @@
+# Publishes a `.nimext` asset on every `v*` tag.
+#
+# That asset is the whole point: Nimbalyst's "Install from GitHub" flow resolves
+# /releases/latest and installs the .nimext it finds there. A release whose asset
+# is missing or malformed is a hard install failure -- it does not degrade to the
+# clone path -- so this job verifies before it publishes, and publishes last.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The app's update check compares a release's tag_name against the manifest
+      # version, so a tag that disagrees with the manifest silently breaks update
+      # detection for everyone already installed. Fail before anything is published.
+      - name: Check the tag matches the manifest version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p 'require("./manifest.json").version')"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} implies version ${tag}, but manifest.json says ${manifest}"
+            exit 1
+          fi
+          echo "version=${manifest}" >> "$GITHUB_ENV"
+
+      - run: npm test
+
+      # Also re-checks manifest/package.json lockstep, and re-opens the archive to
+      # confirm a top-level manifest.json and no stray source.
+      - run: npm run package
+
+      # --latest matters: the installer asks for /releases/latest specifically.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="build/status-panel-${version}.nimext"
+          changelog="$(node -p 'require("./manifest.json").marketplace.changelog')"
+          install="Install by pasting the repository URL into Settings -> Extensions -> Marketplace -> Install from GitHub."
+          notes="${changelog}"$'\n\n'"${install}"
+          gh release create "$GITHUB_REF_NAME" \
+            "$asset" "${asset}.sha256" \
+            --title "Status Panel ${version}" \
+            --notes "$notes" \
+            --verify-tag \
+            --latest \
+            --generate-notes
