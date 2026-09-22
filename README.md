@@ -138,7 +138,7 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
 4. **Non-Claude providers.** Deferred for v1 and documented instead — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. Sessions on Codex/Copilot/Cursor render a strip whose usage chips are about the Claude plan rather than that session. Still to decide: hide the irrelevant chips or show honest placeholders.
-5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only), `repositoryUrl` (no git remote is configured yet), a license, and a real version (GET-93).
+5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only), `repositoryUrl` (no git remote is configured yet) and a real version (GET-93).
 
 Publishing route is unconfirmed: the app only consumes the registry, with no in-app submit path. Start at `docs.nimbalyst.com/extensions`. (The `marketplace.json` constant in the app bundle points at `anthropics/claude-plugins-official` — that is Claude plugins, a different system.)
 
@@ -156,3 +156,11 @@ Nothing below has been exercised against a running instance yet.
 - [ ] Empty states: no session, not a git repo, usage unavailable offline
 - [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
 - [x] The same strip seen on screen in the running panel, with a `gpt-5.6-luna` Codex session resolved (GET-89)
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Mark Kinkade.
+
+`ExtensionMarketplaceMetadata` has no license field (`@nimbalyst/extension-sdk/dist/types/extension.d.ts`), so `package.json` carries `"license": "MIT"` as the machine-readable copy and the registry entry has nowhere to state it.
+
+Nothing third-party is redistributed in `dist/`: `react`, `react-dom` and the SDK are all externalized by `createExtensionConfig`, so the built bundle imports them from the host rather than inlining them. Their own licenses are MIT in any case, so nothing here conflicts.
