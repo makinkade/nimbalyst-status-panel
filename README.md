@@ -129,7 +129,7 @@ https://github.com/makinkade/nimbalyst-status-panel
 
 Nimbalyst resolves `/releases/latest`, downloads the `.nimext` asset and extracts it to `~/.nimbalyst/extensions/com.mkinkade.status-panel/`. Re-pasting the same URL upgrades in place — there is no uninstall step.
 
-`v0.1.0` is published, so this path works. Note that it needs a release and **fails rather than degrading without one**: with no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`, and `dist/` is deliberately gitignored here — that fallback would report *"Extension repository does not include a built dist/ directory."* See [Releasing](#releasing) for how the asset gets there.
+`v0.1.3` is the published release, so this path works. Note that it needs a release and **fails rather than degrading without one**: with no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`, and `dist/` is deliberately gitignored here — that fallback would report *"Extension repository does not include a built dist/ directory."* See [Releasing](#releasing) for how the asset gets there.
 
 ### From source
 
@@ -188,13 +188,15 @@ Settled in GET-93 and not worth re-deciding:
 `.github/workflows/release.yml` runs on any `v*` tag: `npm ci`, version check, `npm test`, `npm run package`, then `gh release create` with both artifacts attached.
 
 ```
-git tag v0.1.1        # must match manifest.json "version"
-git push origin v0.1.1
+git tag v0.1.3        # must match manifest.json "version"
+git push origin v0.1.3
 ```
 
 **The tag and the manifest version have to agree.** The app's update check compares a release's `tag_name` against the installed manifest version, so drift there silently breaks update detection for anyone already installed. Three copies exist — the tag, `manifest.json`, and `package.json` — and both the workflow and `npm run package` refuse to proceed when they disagree, so bump all three together.
 
 The release is published with `--latest`, because the installer asks for `/releases/latest` specifically rather than for a tag.
+
+Note that `0.1.1` and `0.1.2` have changelog entries but no tags: both were built and version-bumped locally and never pushed, so `v0.1.3` is the first release to carry them. Nothing is lost — the installer only ever resolves `/releases/latest` — but it does mean a version bump is not a release until the tag is pushed, and the two can drift a long way apart without anything complaining.
 
 The `.sha256` is emitted alongside for form's sake. Nothing on the GitHub path consumes it — installs from a repo URL record `checksum: ''` — but `installFromUrl` does verify a checksum when the registry supplies one, so the discipline is worth keeping.
 
@@ -239,7 +241,7 @@ Nothing below has been exercised against a running instance yet.
 - [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
 - [x] The same strip seen on screen in the running panel, with a `gpt-5.6-luna` Codex session resolved (GET-89)
 - [x] `npm run package` produces an archive whose top-level `manifest.json` parses under an independent zip reader, with no `src/` or source maps in it
-- [x] `v0.1.0` published by the release workflow, and the app's own resolve-download-extract path replayed against it: `/releases/latest` returns the tag, `selectReleaseAsset` picks the `.nimext`, it extracts with `manifest.json` on top and `dist/` where the manifest points, and the published `.sha256` matches the published asset
+- [x] `v0.1.3` published by the release workflow, and the app's own resolve-download-extract path replayed against it: `/releases/latest` returns the tag, `selectReleaseAsset` picks the `.nimext`, it extracts with `manifest.json` on top and `dist/` where the manifest points, both `screenshots/` PNGs are present at the sizes the manifest points to, and the published `.sha256` matches the published asset
 - [ ] The same thing on a *clean* machine, through the real UI rather than a replay of its logic — Windows (GET-95) and macOS/Linux (GET-96)
 
 ## License
