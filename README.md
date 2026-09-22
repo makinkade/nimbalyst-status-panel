@@ -1,5 +1,7 @@
 # Status Panel
 
+*The Claude Code status line as a bottom panel.*
+
 A Nimbalyst bottom panel that mirrors the Claude Code CLI status line (`~/.claude/statusline.ps1`) for the active Agent session, so SDK-backed sessions show the same information the terminal REPL does.
 
 **Status:** implemented and building. Not yet installed into Nimbalyst or verified live — see [Install](#install).
@@ -136,7 +138,7 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
 4. **Non-Claude providers.** Deferred for v1 and documented instead — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. Sessions on Codex/Copilot/Cursor render a strip whose usage chips are about the Claude plan rather than that session. Still to decide: hide the irrelevant chips or show honest placeholders.
-5. **Packaging.** Add the `marketplace` block (categories, tags, icon, tagline, longDescription, highlights, screenshots — see `resources/extensions/git/manifest.json`), a license, a repo link, and a real version.
+5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only), `repositoryUrl` (no git remote is configured yet), a license, and a real version (GET-93).
 
 Publishing route is unconfirmed: the app only consumes the registry, with no in-app submit path. Start at `docs.nimbalyst.com/extensions`. (The `marketplace.json` constant in the app bundle points at `anthropics/claude-plugins-official` — that is Claude plugins, a different system.)
 

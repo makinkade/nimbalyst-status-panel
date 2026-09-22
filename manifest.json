@@ -8,7 +8,29 @@
   "styles": "dist/index.css",
   "apiVersion": "1.0.0",
   "marketplace": {
-    "longDescription": "Mirrors the Claude Code CLI status line inside Nimbalyst. A chip strip in the bottom panel shows the focused session's model, reasoning effort, workspace permission mode, working directory, git branch with uncommitted-file count, context-window usage, and Claude plan limits — the 5-hour and 7-day bars plus model-scoped caps such as `7d Fable`. A gear chip picks which segments appear and in what order, and that choice follows you across workspaces.\n\n**Claude Code only.** This version is built for Claude Code sessions and does not support Copilot, Cursor or Codex. Model names are resolved from Claude Code model ids, and the plan-usage chips read your Anthropic plan directly, so on a session from another provider they report your Claude plan rather than anything about that session. The provider-neutral chips — effort, permission mode, directory and branch — work regardless. Per-provider behaviour is deferred to a later release."
+    "categories": [
+      "developer-tools"
+    ],
+    "tags": [
+      "claude",
+      "claude-code",
+      "status-line",
+      "session",
+      "context",
+      "usage",
+      "tokens"
+    ],
+    "icon": "monitoring",
+    "tagline": "The Claude Code status line as a bottom panel",
+    "longDescription": "Mirrors the Claude Code CLI status line inside Nimbalyst. A chip strip in the bottom panel shows the focused session's model, reasoning effort, workspace permission mode, working directory, git branch with uncommitted-file count, context-window usage, and Claude plan limits — the 5-hour and 7-day bars plus model-scoped caps such as `7d Fable`. A gear chip picks which segments appear and in what order, and that choice follows you across workspaces.\n\n**Claude Code only.** This version is built for Claude Code sessions and does not support Copilot, Cursor or Codex. Model names are resolved from Claude Code model ids, and the plan-usage chips read your Anthropic plan directly, so on a session from another provider they report your Claude plan rather than anything about that session. The provider-neutral chips — effort, permission mode, directory and branch — work regardless. Per-provider behaviour is deferred to a later release.",
+    "highlights": [
+      "Model, reasoning effort, permission mode, directory and branch for the focused session",
+      "Context-window bar with input and output token counts",
+      "Claude plan limits: the 5-hour and 7-day bars plus model-scoped caps such as 7d Fable",
+      "Gear chip choosing which segments appear and in what order, remembered across workspaces",
+      "Keyboard shortcut (Ctrl+Shift+S) for quick access"
+    ],
+    "changelog": "0.1.0: First release. Chip strip for the focused session with model, effort, permission mode, directory, branch, context usage and Claude plan limits, plus a configurable segment order. Claude Code sessions only."
   },
   "permissions": {
     "filesystem": true
