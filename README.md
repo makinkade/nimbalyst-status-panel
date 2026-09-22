@@ -13,7 +13,7 @@ v1 is built for Claude Code sessions, and that is a deliberate limit rather than
 What that means on a session from another provider:
 
 - **Model** — the chip matches the session's model id against the whole model catalog, so a non-Claude model usually still resolves to a name. When it does not, the fallback in `src/lib/modelNames.ts` only knows `claude-code:` ids, and the raw id is shown instead.
-- **5h / 7d / scoped caps** — these read Anthropic's plan-usage endpoint with your Claude OAuth token. They report *your Claude plan*, not the focused session, so alongside a Copilot session they are unrelated numbers.
+- **5h / 7d / scoped caps** — these read Anthropic's plan-usage endpoint with your Claude OAuth token, so they report *your Claude plan* rather than the focused session. Alongside a session from another provider they now say so: the chips read `Claude 5h` rather than `5h`, drop to the muted accent instead of green/yellow/red, and their tooltip names the provider the session actually runs on (GET-103). The number is kept — your Claude plan is yours whichever session is in front of you — but the colour stops claiming urgency about a session it does not govern.
 - **Effort, permission mode, directory, branch** — provider-neutral; these work the same either way.
 - **Context** — comes from the session's own `metadata.tokenUsage`, so it populates for any provider that records it and reads `Context —` otherwise.
 
@@ -22,9 +22,9 @@ Confirmed on screen against a live `openai-codex` session (GET-89): every chip r
 Two rough edges did show up there, and both are about *which* session the strip describes and *whose* limits it reports:
 
 - **The strip follows the most recently updated session, not the one you are looking at.** Switching to a Codex session in the UI does not move the chips; prompting it does. `metadata.metadata.lastReadAt` is the signal that would fix this — `setActiveSessionAtom` calls `markSessionReadAtom` unconditionally on every active-session change, which persists `lastReadAt` through `ai:updateSessionMetadata` and broadcasts the `sessions:session-updated` the panel already listens for. Ranking candidates by `lastReadAt`, falling back to `updatedAt`, would track the visible session without needing the renderer atom `session:get-active` refuses to expose.
-- **The 5h / 7d / scoped bars keep reporting the Claude plan** next to a session that has nothing to do with it, with no visual hint that they are unrelated.
+- **~~The 5h / 7d / scoped bars keep reporting the Claude plan~~** next to a session that has nothing to do with it, with no visual hint that they are unrelated. Fixed in GET-103: they are relabelled and muted, as described above. Hiding them outright was considered and rejected — the bar's presence was never the problem, its colour was.
 
-Turning the usage chips off in the gear popover is the practical workaround until per-provider behaviour is decided.
+Turning the usage chips off in the gear popover remains there if you would rather not see them at all.
 
 ## Why a panel
 
@@ -44,7 +44,7 @@ Rendered as a chip strip, in status-line order:
 | Directory | Repo root folder name when in a git repo, else the workspace folder |
 | Branch | Current branch, with `±n` uncommitted-file count |
 | Context | 10-cell bar, percentage, `↑input ↓output` counts |
-| 5h / 7d | Plan utilization bars with reset stamps |
+| 5h / 7d | Claude plan utilization bars with reset stamps; `Claude 5h` and muted beside a non-Claude session |
 | Scoped caps | Model-scoped limits from the API's `limits[]`, e.g. `7d Fable` |
 
 Chips are centered in the strip, and a gear chip at the end opens a popover for choosing which segments appear and in what order (checkbox + up/down, with Reset). The choice is persisted through `host.storage.setGlobal`, so it follows you across workspaces rather than resetting per project. A stored config is reconciled against the current segment list on load, so segments added in a later version appear instead of silently vanishing.
@@ -197,7 +197,7 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 1. **~~Cross-platform usage fetch.~~** Done — nothing is exec'd, so there is no command left to make portable.
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
-4. **Non-Claude providers.** Deferred for v1 and documented instead — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. Sessions on Codex/Copilot/Cursor render a strip whose usage chips are about the Claude plan rather than that session. Still to decide: hide the irrelevant chips or show honest placeholders.
+4. **Non-Claude providers.** Still Claude-first, but no longer silently misleading — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. ~~Still to decide: hide the irrelevant chips or show honest placeholders.~~ Decided in GET-103, for honest placeholders: beside a session whose provider is not `claude-code`, the plan chips relabel to `Claude 5h` / `Claude 7d` / `Claude 7d Fable`, render in the muted accent rather than green/yellow/red, and name the session's actual provider in their tooltip. `src/lib/provider.ts` resolves the provider from `session.provider`, falling back to the `provider:` prefix of the model id; a provider it cannot determine leaves the chips alone, so only a positive non-Claude signal demotes them. What stays genuinely provider-specific is the Model chip's name fallback, and the fact that no other provider's quota is reported at all.
 5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). ~~Version and author identity~~ are done too (GET-93) — see [Published identity](#published-identity). Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only). `screenshots/` is already in the packaging script's file list, so it will ship as soon as the PNGs land.
 
 Publishing route is settled: **the registry is first-party only.** Every live entry is authored by Nimbalyst under `com.nimbalyst.*`, and `registry.json` is a generated artifact pushed to Nimbalyst's own R2 bucket rather than a file anyone can PR — being listed means a maintainer adds a local path to `packages/marketplace/release-extensions.txt`, which is a favour rather than a process. The docs' offer to "publish an extension you built yourself" has no workflow behind it.
@@ -216,6 +216,8 @@ Nothing below has been exercised against a running instance yet.
 - [x] `statusline.ps1` still renders correctly after the extraction
 - [ ] Light and dark themes both legible
 - [ ] Empty states: no session, not a git repo, usage unavailable offline
+- [x] The plan chips degrade to `Claude 5h` in the muted accent beside a non-Claude session, keeping the number and dropping the urgency colour (GET-103) — `src/StatusPanel.test.tsx`, `src/lib/provider.test.ts`
+- [x] The same degradation seen on screen in the running panel after a restart (GET-103)
 - [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
 - [x] The same strip seen on screen in the running panel, with a `gpt-5.6-luna` Codex session resolved (GET-89)
 - [x] `npm run package` produces an archive whose top-level `manifest.json` parses under an independent zip reader, with no `src/` or source maps in it

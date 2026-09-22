@@ -44,10 +44,28 @@ function codexStatus(overrides: Partial<Status> = {}): Status {
   };
 }
 
+/** Plan-usage readings high enough that the colour is a loud claim. */
+const LOUD_PLAN_USAGE = {
+  timestamp: new Date().toISOString(),
+  fiveHour: 91,
+  fiveHourReset: new Date(Date.now() + 3_600_000).toISOString(),
+  sevenDay: 88,
+  sevenDayReset: new Date(Date.now() + 86_400_000).toISOString(),
+  scoped: [{ label: '7d Fable', pct: 95, reset: null }],
+};
+
 /** The strip as the panel assembles it: every segment, in default order. */
 function renderStrip(status: Status): string {
   const segments = buildSegments(status, WORKSPACE);
   return SEGMENT_IDS.map((id) => renderToStaticMarkup(<>{segments[id]}</>)).join('');
+}
+
+/** Just the three plan chips, which are the ones that can lie about a session. */
+function renderUsage(status: Status): string {
+  const segments = buildSegments(status, WORKSPACE);
+  return (['usage5h', 'usage7d', 'usageScoped'] as const)
+    .map((id) => renderToStaticMarkup(<>{segments[id]}</>))
+    .join('');
 }
 
 describe('a session from another provider', () => {
@@ -78,21 +96,10 @@ describe('a session from another provider', () => {
     expect(html).toContain('master');
   });
 
-  it('renders the Claude plan bars alongside it rather than failing on them', () => {
-    // The usage chips report the Claude plan whatever the session is. Unrelated
-    // numbers are the documented v1 rough edge; a crash would not be.
-    const html = renderStrip(
-      codexStatus({
-        planUsage: {
-          timestamp: new Date().toISOString(),
-          fiveHour: 41,
-          fiveHourReset: new Date(Date.now() + 3_600_000).toISOString(),
-          sevenDay: 63,
-          sevenDayReset: new Date(Date.now() + 86_400_000).toISOString(),
-          scoped: [{ label: '7d Fable', pct: 12, reset: null }],
-        },
-      }),
-    );
+  it('still renders the Claude plan bars rather than dropping them', () => {
+    // GET-103 chose to qualify these chips, not to hide them: the Claude plan
+    // is yours whichever session is in front of you.
+    const html = renderStrip(codexStatus({ planUsage: LOUD_PLAN_USAGE }));
     expect(html).toContain('5h');
     expect(html).toContain('7d Fable');
   });
@@ -109,5 +116,106 @@ describe('a session from another provider', () => {
         }),
       ),
     ).not.toThrow();
+  });
+});
+
+/**
+ * GET-103: the plan chips read Anthropic's usage endpoint with your Claude
+ * credentials, so they describe your Claude plan whatever session is focused.
+ * Beside a Codex session a red `5h 91%` reads as urgency about *that* session,
+ * which is the false claim. The numbers stay; the label says whose plan they
+ * are, and the colour stops asserting urgency the panel cannot vouch for.
+ */
+describe('the plan chips beside a non-Claude session', () => {
+  const MUTED = 'var(--nim-text-muted)';
+
+  it('qualifies every label with the plan it actually describes', () => {
+    const html = renderUsage(codexStatus({ planUsage: LOUD_PLAN_USAGE }));
+    expect(html).toContain('Claude 5h');
+    expect(html).toContain('Claude 7d');
+    expect(html).toContain('Claude 7d Fable');
+  });
+
+  it('drops the urgency colour a loud reading would otherwise carry', () => {
+    const html = renderUsage(codexStatus({ planUsage: LOUD_PLAN_USAGE }));
+    // 91 / 88 / 95 are all past `usageColor`'s red threshold.
+    expect(html).not.toContain('#ef5350');
+    // All three chips: 5h, 7d and the one scoped cap.
+    expect(html.split(MUTED).length - 1).toBeGreaterThanOrEqual(3);
+  });
+
+  it('says so in the tooltip, naming the provider actually in front of you', () => {
+    const html = renderUsage(codexStatus({ planUsage: LOUD_PLAN_USAGE }));
+    expect(html).toContain('describes your Claude plan, not this session');
+    expect(html).toContain('openai-codex');
+  });
+
+  it('keeps the percentage itself intact', () => {
+    // Demotion is about the claim, not the data: hiding the number was the
+    // option GET-103 rejected.
+    const html = renderUsage(codexStatus({ planUsage: LOUD_PLAN_USAGE }));
+    expect(html).toContain('91%');
+    expect(html).toContain('95%');
+  });
+
+  it('degrades the fallback bars from claude-usage:get the same way', () => {
+    // No plan-usage reading, so the chips come from the host channel instead.
+    const html = renderUsage(
+      codexStatus({
+        usage: {
+          fiveHour: { utilization: 91, resetsAt: null },
+          sevenDay: { utilization: 88, resetsAt: null },
+          sevenDayOpus: { utilization: 95, resetsAt: null },
+        },
+      }),
+    );
+    expect(html).toContain('Claude 5h');
+    expect(html).toContain('Claude 7d Opus');
+    expect(html).not.toContain('#ef5350');
+  });
+
+  it('qualifies the empty scoped-caps placeholder too', () => {
+    const html = renderUsage(
+      codexStatus({ planUsage: { ...LOUD_PLAN_USAGE, scoped: [] } }),
+    );
+    expect(html).toContain('No scoped caps');
+    expect(html).toContain('the caps are not about it');
+  });
+
+  it('degrades on the model id alone when the record carries no provider', () => {
+    const html = renderUsage(
+      codexStatus({
+        session: { id: 'x', model: 'openai-codex:gpt-5.6-luna' },
+        planUsage: LOUD_PLAN_USAGE,
+      }),
+    );
+    expect(html).toContain('Claude 5h');
+  });
+});
+
+describe('the plan chips beside a Claude session', () => {
+  const CLAUDE_SESSION: SessionRecord = {
+    id: '0b6a0f22-5f1f-4a1d-bb2a-0a5a2b1f9c77',
+    title: 'Status panel work',
+    model: 'claude-code:opus-1m',
+    provider: 'claude-code',
+  };
+
+  it('leaves the labels bare and the urgency colour intact', () => {
+    // The disclaimer is only worth its width when there is a competing model on
+    // screen; here the bars are exactly what they appear to be.
+    const html = renderUsage(
+      codexStatus({ session: CLAUDE_SESSION, planUsage: LOUD_PLAN_USAGE }),
+    );
+    expect(html).toContain('>5h<');
+    expect(html).not.toContain('Claude 5h');
+    expect(html).toContain('#ef5350');
+  });
+
+  it('leaves them alone when no session is resolved at all', () => {
+    // Nothing on screen to contradict: the bars are simply your plan.
+    const html = renderUsage(codexStatus({ session: null, planUsage: LOUD_PLAN_USAGE }));
+    expect(html).not.toContain('Claude 5h');
+    expect(html).toContain('#ef5350');
   });
 });

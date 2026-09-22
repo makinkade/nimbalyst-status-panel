@@ -34,10 +34,12 @@ export const SEGMENT_DESCRIPTIONS: Record<SegmentId, string> = {
   branch: 'Current git branch, with a count of uncommitted files.',
   context:
     "How much of the model's context window the session occupies right now, with input and output token counts.",
-  usage5h: 'Your rolling 5-hour plan utilization, and when it resets.',
-  usage7d: 'Your rolling 7-day plan utilization, and when it resets.',
+  // All three describe your Claude plan whatever session is focused, which is
+  // why the chips qualify themselves beside a session from another provider.
+  usage5h: 'Your rolling 5-hour Claude plan utilization, and when it resets.',
+  usage7d: 'Your rolling 7-day Claude plan utilization, and when it resets.',
   usageScoped:
-    'Model-scoped plan caps reported by the usage API, such as a separate weekly limit for one model.',
+    'Model-scoped Claude plan caps reported by the usage API, such as a separate weekly limit for one model.',
 };
 
 export interface SegmentConfig {

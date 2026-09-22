@@ -11,6 +11,7 @@ import {
 } from './lib/format';
 import { EffortSource, extractTokenUsage } from './lib/ipc';
 import { friendlyModelName } from './lib/modelNames';
+import { foreignProvider } from './lib/provider';
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
 import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
 import { SegmentId } from './segments';
@@ -39,6 +40,11 @@ interface UsageBar {
   reset: string | null;
   /** Age of the reading, when it is old enough to be worth saying so. */
   staleSince?: string | null;
+  /**
+   * The non-Claude provider of the session on screen, when there is one. The
+   * bar is about your Claude plan either way; this is what makes it say so.
+   */
+  foreign?: string | null;
 }
 
 export function StatusPanel({ host }: { host: PanelHost }) {
@@ -102,7 +108,11 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
 
   // Repo root name when in a git repo, else the folder name -- as in the status line.
   const displayPath = folderName(git.repoPath ?? workspacePath);
-  const bars = buildUsageBars(planUsage, usage);
+
+  // The plan chips report your Claude plan whatever the session is, so beside a
+  // session from another provider they have to say whose plan they mean.
+  const foreign = foreignProvider(session);
+  const bars = buildUsageBars(planUsage, usage, foreign);
 
   return {
     model: (
@@ -205,7 +215,9 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
         accent={MUTED}
         title={
           planUsage
-            ? 'No model-scoped caps in the usage API right now'
+            ? `No model-scoped caps on your Claude plan right now${
+                foreign ? ` (this is a ${foreign} session; the caps are not about it)` : ''
+              }`
             : 'Usage endpoint unreachable; claude-usage:get does not expose scoped caps'
         }
       >
@@ -248,10 +260,15 @@ function renderBar(bar: UsageBar | null): ReactNode {
 /**
  * The usage endpoint is authoritative when it answers: it carries the scoped
  * model caps (e.g. `7d Fable`) that `claude-usage:get` drops.
+ *
+ * `foreign` rides along on every bar rather than being applied here: the
+ * numbers are the same numbers whoever is on screen, and it is only their
+ * presentation -- label and colour -- that has to change.
  */
 function buildUsageBars(
   planUsage: Status['planUsage'],
   usage: Status['usage'],
+  foreign: string | null = null,
 ): { fiveHour: UsageBar | null; sevenDay: UsageBar | null; scoped: UsageBar[] } {
   if (planUsage) {
     const readAt = planUsage.timestamp ? Date.parse(planUsage.timestamp) : NaN;
@@ -270,6 +287,7 @@ function buildUsageBars(
               percent: planUsage.fiveHour,
               reset: planUsage.fiveHourReset ?? null,
               staleSince,
+              foreign,
             }
           : null,
       sevenDay:
@@ -281,6 +299,7 @@ function buildUsageBars(
               percent: planUsage.sevenDay,
               reset: planUsage.sevenDayReset ?? null,
               staleSince,
+              foreign,
             }
           : null,
       scoped: (planUsage.scoped ?? []).map((scoped) => ({
@@ -290,6 +309,7 @@ function buildUsageBars(
         percent: scoped.pct,
         reset: scoped.reset,
         staleSince,
+        foreign,
       })),
     };
   }
@@ -302,6 +322,7 @@ function buildUsageBars(
           label: '5h',
           percent: usage.fiveHour.utilization,
           reset: usage.fiveHour.resetsAt,
+          foreign,
         }
       : null,
     sevenDay: usage?.sevenDay
@@ -311,6 +332,7 @@ function buildUsageBars(
           label: '7d',
           percent: usage.sevenDay.utilization,
           reset: usage.sevenDay.resetsAt,
+          foreign,
         }
       : null,
     // seven_day_opus is the host's only scoped window.
@@ -322,36 +344,62 @@ function buildUsageBars(
             label: '7d Opus',
             percent: usage.sevenDayOpus.utilization,
             reset: usage.sevenDayOpus.resetsAt,
+            foreign,
           },
         ]
       : [],
   };
 }
 
+/**
+ * What the chip calls itself: `Claude 5h` beside a session from another
+ * provider, `5h` beside a Claude one.
+ *
+ * The qualifier is only worth its width when there is something on screen it
+ * could be confused with.
+ */
+function usageBarLabel(bar: UsageBar): string {
+  return bar.foreign ? `Claude ${bar.label}` : bar.label;
+}
+
 function UsageChip({ bar }: { bar: UsageBar }) {
   const stale = !!bar.staleSince;
-  // A stale number must not keep its red/green authority -- the colour is a
-  // claim about right now.
-  const color = stale ? MUTED : usageColor(bar.percent);
+  const label = usageBarLabel(bar);
+
+  // A reading the panel cannot vouch for loses its red/green authority: the
+  // colour is a claim about urgency right now, for the session in front of you.
+  // A stale number fails the "right now" half; a Claude plan bar beside a Codex
+  // session fails the "for this session" half. Both demote to muted.
+  const color = stale || bar.foreign ? MUTED : usageColor(bar.percent);
   const reset = formatResetTime(bar.reset);
   const countdown = formatCountdown(bar.reset);
 
   // The strip re-renders on the 5s status tick, so the countdown stays current.
   const live = reset
-    ? `${bar.label} at ${Math.round(bar.percent)}% — resets ${reset}${countdown ? ` (in ${countdown})` : ''}`
-    : `${bar.label} at ${Math.round(bar.percent)}%`;
+    ? `${label} at ${Math.round(bar.percent)}% — resets ${reset}${countdown ? ` (in ${countdown})` : ''}`
+    : `${label} at ${Math.round(bar.percent)}%`;
 
-  const title = stale
-    ? `${live}
+  const notes = [live];
 
-STALE — last reading that actually came back: ${formatResetTime(bar.staleSince)}. ` +
-      'The usage API rate-limits too, and it does so precisely when you are near a cap, ' +
-      'so this is the last value received rather than your current usage.'
-    : live;
+  if (stale) {
+    notes.push(
+      `STALE — last reading that actually came back: ${formatResetTime(bar.staleSince)}. ` +
+        'The usage API rate-limits too, and it does so precisely when you are near a cap, ' +
+        'so this is the last value received rather than your current usage.',
+    );
+  }
+
+  if (bar.foreign) {
+    notes.push(
+      'This bar describes your Claude plan, not this session — the focused session runs on ' +
+        `${bar.foreign}. Plan usage is read from Anthropic with your Claude credentials, so it ` +
+        'is the same number whichever session is in front of you.',
+    );
+  }
 
   return (
-    <Chip icon={bar.icon} accent={color} title={title}>
-      <span className="sp-label">{bar.label}</span>
+    <Chip icon={bar.icon} accent={color} title={notes.join('\n\n')}>
+      <span className="sp-label">{label}</span>
       <Bar percent={bar.percent} color={color} />
       <span className="sp-value">
         {Math.round(bar.percent)}%{stale ? '?' : ''}
