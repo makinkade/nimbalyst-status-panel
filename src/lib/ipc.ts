@@ -124,12 +124,77 @@ export interface ModelInfo {
 // ── Queries ─────────────────────────────────────────────────────────────────
 
 /**
+ * Workspace state, as `workspace:get-state` hands it over.
+ *
+ * One read serves two questions -- which session is selected, and what the
+ * permission mode is -- so the caller fetches it once and passes it to both
+ * rather than spending two round trips on the same channel per refresh.
+ */
+export interface WorkspaceState {
+  agenticCodingWindowState?: {
+    selectedWorkstream?: { type?: string; id?: string } | null;
+  } | null;
+  workstreamStates?: Record<string, { activeChildId?: string | null } | undefined> | null;
+  worktreeActiveSessions?: Record<string, string> | null;
+  agentPermissions?: {
+    permissionMode?: string | null;
+    allowAllUsesClassifier?: boolean | null;
+  };
+  agentPermissionMode?: string | null;
+}
+
+export async function getWorkspaceState(workspacePath: string): Promise<WorkspaceState | null> {
+  return invoke<WorkspaceState>('workspace:get-state', workspacePath);
+}
+
+/**
+ * The session the sidebar has selected, read straight out of workspace state.
+ *
+ * GET-102: focus used to be approximated by "most recently updated in this
+ * workspace", so switching sessions moved nothing until you prompted the new
+ * one -- the strip kept describing the session that was still being written
+ * to. The renderer keeps the truth in `activeSessionIdAtom`, which extensions
+ * cannot read, but it does not keep it only there: `setSelectedWorkstreamAtom`
+ * calls `persistSelectedWorkstream` on every selection change, which writes
+ * `agenticCodingWindowState.selectedWorkstream` through
+ * `workspace:update-state`. That is the selection itself rather than a proxy
+ * for it, it is already scoped to this workspace, and it survives a restart --
+ * so the session active at app start is the one the app restores.
+ *
+ * The ticket proposed ranking by `metadata.metadata.lastReadAt` instead. That
+ * value is real, and is still the fallback below, but it is the weaker signal:
+ * the tray's "clear all unread" stamps one identical `lastReadAt` onto every
+ * unread session at once, and `sessions:sync-read-state` can import one from
+ * another machine. Neither can disturb the persisted selection.
+ *
+ * A group selection names the group, so it is resolved down to the session
+ * actually on screen: `worktreeActiveSessions` for a worktree, and
+ * `workstreamStates[id].activeChildId` for a workstream. For an ordinary
+ * single session `activeChildId` is that session's own id, so the same lookup
+ * is harmless.
+ */
+export function selectedSessionId(state: WorkspaceState | null): string | null {
+  const selection = state?.agenticCodingWindowState?.selectedWorkstream;
+  const id = selection?.id;
+  if (typeof id !== 'string' || !id) return null;
+
+  if (selection?.type === 'worktree') {
+    const active = state?.worktreeActiveSessions?.[id];
+    if (typeof active === 'string' && active) return active;
+  }
+
+  const child = state?.workstreamStates?.[id]?.activeChildId;
+  if (typeof child === 'string' && child) return child;
+
+  return id;
+}
+
+/**
  * The session the panel describes.
  *
- * Nimbalyst keeps the focused session in a renderer atom that extensions cannot
- * read, so "focused" is approximated by "most recently updated in this
- * workspace" -- the session you are talking to is the one being written to.
- * Re-queried whenever the app broadcasts a session update.
+ * Prefers the selection above, falling back to the timestamp heuristic when
+ * the workspace has no persisted selection yet or it names a workstream root
+ * with no conversation in it.
  *
  * This used to prefer a raw `SELECT` against `ai_sessions` via the
  * `nimbalyst-database-read` catalog permission, with the IPC channels as a
@@ -139,8 +204,11 @@ export interface ModelInfo {
  * `sessions:list` plus `sessions:get` answer the same question, so the fallback
  * is now the only path.
  */
-export async function getFocusedSession(workspacePath: string): Promise<SessionRecord | null> {
-  return listFocusedSession(workspacePath);
+export async function getFocusedSession(
+  workspacePath: string,
+  state: WorkspaceState | null = null,
+): Promise<SessionRecord | null> {
+  return listFocusedSession(workspacePath, selectedSessionId(state));
 }
 
 /**
@@ -173,10 +241,27 @@ const MAX_CANDIDATES = 8;
  * children nothing can have overtaken it and one `sessions:get` settles it.
  * Only when a parent is in front do we resolve the rest.
  */
-async function listFocusedSession(workspacePath: string): Promise<SessionRecord | null> {
+async function listFocusedSession(
+  workspacePath: string,
+  selectedId: string | null,
+): Promise<SessionRecord | null> {
   const listed = await invoke<unknown>('sessions:list', workspacePath, { limit: 50 });
   const entries = normalizeSessionList(listed);
   if (entries.length === 0) return null;
+
+  // The selection the app persisted, when it names something this workspace
+  // still lists. A root the user selected before opening any of its children
+  // has no conversation to describe, so it falls through to the ranking below
+  // rather than blanking the strip.
+  if (selectedId) {
+    const entry = entries.find((candidate) => candidate.id === selectedId);
+    if (entry) {
+      const session = await resolveSession(entry);
+      if (session && !(hasChildren(entry) && extractTokenUsage(session) === null)) {
+        return session;
+      }
+    }
+  }
 
   if (!hasChildren(entries[0])) return resolveSession(entries[0]);
 
@@ -190,9 +275,42 @@ async function listFocusedSession(workspacePath: string): Promise<SessionRecord 
   const conversed = resolved.filter((session) => extractTokenUsage(session) !== null);
   const pool = conversed.length > 0 ? conversed : resolved;
 
+  return rankByFocus(pool);
+}
+
+/**
+ * Pick the session most likely to be on screen, with no persisted selection to
+ * go on.
+ *
+ * Sessions that have been read outrank ones that never have, rather than being
+ * compared against them on a merged key: an unread session an agent is writing
+ * to in the background carries a fresh `updatedAt`, and that is exactly the
+ * session that must not take the strip away from the one being read. Only when
+ * nothing has ever been read does `updatedAt` decide, which is the behaviour
+ * this panel has always had.
+ *
+ * `updatedAt` still breaks ties, because the tray's "clear all unread" marks
+ * every unread session with a single shared timestamp.
+ */
+function rankByFocus(pool: SessionRecord[]): SessionRecord | null {
+  if (pool.length === 0) return null;
+
+  const read = pool.filter((session) => extractLastReadAt(session) !== null);
+  if (read.length > 0) {
+    return read.reduce((best, session) =>
+      compareRead(session, best) > 0 ? session : best,
+    );
+  }
+
   return pool.reduce((best, session) =>
     timestamp(session.updatedAt) > timestamp(best.updatedAt) ? session : best,
   );
+}
+
+function compareRead(a: SessionRecord, b: SessionRecord): number {
+  const byRead = (extractLastReadAt(a) ?? 0) - (extractLastReadAt(b) ?? 0);
+  if (byRead !== 0) return byRead;
+  return timestamp(a.updatedAt) - timestamp(b.updatedAt);
 }
 
 /** List entries report a real `childCount`, unlike `messageCount`. */
@@ -270,18 +388,11 @@ export async function getUsage(): Promise<ClaudeUsage | null> {
  * reports "Bypass" for a workspace that is really in Auto. `bypass-all` with
  * the classifier off is genuine bypass and stays "Bypass".
  */
-export async function getPermissionMode(workspacePath: string): Promise<string | null> {
+export async function getPermissionMode(state: WorkspaceState | null): Promise<string | null> {
   // The real home of the value: workspace state -> agentPermissions.permissionMode.
   // (`agentPermissionMode` only exists as a flattened field in the settings
-  // overview, not as a settings key.)
-  const state = await invoke<{
-    agentPermissions?: {
-      permissionMode?: string | null;
-      allowAllUsesClassifier?: boolean | null;
-    };
-    agentPermissionMode?: string | null;
-  }>('workspace:get-state', workspacePath);
-
+  // overview, not as a settings key.) The state itself is fetched once by the
+  // caller and shared with `selectedSessionId`.
   const mode = state?.agentPermissions?.permissionMode ?? state?.agentPermissionMode;
   if (typeof mode === 'string' && mode) {
     if (mode === 'bypass-all' && state?.agentPermissions?.allowAllUsesClassifier === true) {
@@ -311,6 +422,35 @@ export function extractTokenUsage(session: SessionRecord | null): TokenUsage | n
 
   for (const candidate of candidates) {
     if (candidate && typeof candidate === 'object') return candidate as TokenUsage;
+  }
+  return null;
+}
+
+/**
+ * When the session was last opened, in epoch ms.
+ *
+ * Written by `markSessionReadAtom` as `{ hasUnread: false, lastReadAt }`
+ * through `ai:updateSessionMetadata`, which lands one level down in
+ * `metadata.metadata` -- the same nesting `tokenUsage` has to be dug out of.
+ * Note this moves on selection only; an agent writing into a background
+ * session sets `hasUnread`, not this.
+ */
+export function extractLastReadAt(session: SessionRecord | null): number | null {
+  if (!session) return null;
+
+  const metadata = session.metadata as Record<string, unknown> | undefined;
+  const candidates = [
+    (metadata?.metadata as Record<string, unknown> | undefined)?.lastReadAt,
+    metadata?.lastReadAt,
+    (session as unknown as Record<string, unknown>).lastReadAt,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+    if (typeof candidate === 'string') {
+      const parsed = Date.parse(candidate);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
   }
   return null;
 }
