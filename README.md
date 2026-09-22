@@ -4,7 +4,7 @@
 
 A Nimbalyst bottom panel that mirrors the Claude Code CLI status line (`~/.claude/statusline.ps1`) for the active Agent session, so SDK-backed sessions show the same information the terminal REPL does.
 
-**Status:** implemented and building. Not yet installed into Nimbalyst or verified live — see [Install](#install).
+**Status:** installed and running in Nimbalyst, verified on screen against live Claude Code and Codex sessions. Several checks are still open — see [Verification checklist](#verification-checklist).
 
 ## Claude Code only
 
@@ -113,22 +113,38 @@ Formatting, thresholds, and the palette are ported verbatim so a bar that is red
 
 ## Install
 
+### From GitHub
+
+Settings → Extensions → Marketplace → **Install from GitHub**, and paste:
+
+```
+https://github.com/makinkade/nimbalyst-status-panel
+```
+
+Nimbalyst resolves `/releases/latest`, downloads the `.nimext` asset and extracts it to `~/.nimbalyst/extensions/com.mkinkade.status-panel/`. Re-pasting the same URL upgrades in place — there is no uninstall step.
+
+**This path needs a published release, and fails rather than degrading without one.** With no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`; `dist/` is deliberately gitignored here, so the clone path reports *"Extension repository does not include a built dist/ directory."* Until the first tagged release, build from source.
+
+### From source
+
 Requires Extension Dev Tools (Settings → Advanced). **The `extension_*` MCP tools attach at session start**, so after enabling the setting, restart Nimbalyst or start a new AI session before installing.
 
 ```
+git clone https://github.com/makinkade/nimbalyst-status-panel
+cd nimbalyst-status-panel
 npm install
 npm run build        # -> dist/index.js, dist/index.css
 npm test             # cache, throttle and staleness discipline in the usage client
 ```
 
-Then from a session that has the dev tools:
+Then from a session that has the dev tools, pointing at your own clone:
 
 ```
-extension_install({ path: "C:\\Users\\Mark Kinkade\\source\\repos\\nimbalyst-status-panel" })
+extension_install({ path: "/absolute/path/to/nimbalyst-status-panel" })
 extension_get_status({ extensionId: "com.mkinkade.status-panel" })
 ```
 
-Iterate with `extension_reload({ extensionId, path })`.
+Iterate with `extension_reload({ extensionId, path })` — though a reload does not reliably remount an already-mounted panel, so restart Nimbalyst when a change does not show up.
 
 ## Marketplace readiness (backlog)
 
