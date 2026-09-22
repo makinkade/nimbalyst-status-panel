@@ -123,7 +123,7 @@ https://github.com/makinkade/nimbalyst-status-panel
 
 Nimbalyst resolves `/releases/latest`, downloads the `.nimext` asset and extracts it to `~/.nimbalyst/extensions/com.mkinkade.status-panel/`. Re-pasting the same URL upgrades in place — there is no uninstall step.
 
-**This path needs a published release, and fails rather than degrading without one.** With no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`; `dist/` is deliberately gitignored here, so the clone path reports *"Extension repository does not include a built dist/ directory."* Until the first tag is pushed there is no release to resolve, so build [from source](#from-source) — see [Releasing](#releasing) for what publishing one involves.
+`v0.1.0` is published, so this path works. Note that it needs a release and **fails rather than degrading without one**: with no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`, and `dist/` is deliberately gitignored here — that fallback would report *"Extension repository does not include a built dist/ directory."* See [Releasing](#releasing) for how the asset gets there.
 
 ### From source
 
@@ -211,7 +211,8 @@ Nothing below has been exercised against a running instance yet.
 - [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
 - [x] The same strip seen on screen in the running panel, with a `gpt-5.6-luna` Codex session resolved (GET-89)
 - [x] `npm run package` produces an archive whose top-level `manifest.json` parses under an independent zip reader, with no `src/` or source maps in it
-- [ ] That archive installs on a clean machine by pasting the repo URL — Windows (GET-95) and macOS/Linux (GET-96). Not exercised: no tag has been pushed, so there is no release to resolve yet
+- [x] `v0.1.0` published by the release workflow, and the app's own resolve-download-extract path replayed against it: `/releases/latest` returns the tag, `selectReleaseAsset` picks the `.nimext`, it extracts with `manifest.json` on top and `dist/` where the manifest points, and the published `.sha256` matches the published asset
+- [ ] The same thing on a *clean* machine, through the real UI rather than a replay of its logic — Windows (GET-95) and macOS/Linux (GET-96)
 
 ## License
 
