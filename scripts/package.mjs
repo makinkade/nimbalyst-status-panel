@@ -2,8 +2,8 @@
 /**
  * Packages the extension as `build/status-panel-<version>.nimext` plus a `.sha256`.
  *
- * A `.nimext` is a zip that Nimbalyst extracts straight into
- * `~/.nimbalyst/extensions/{id}/`, so `manifest.json` has to sit at the top level
+ * A `.nimext` is a zip that Nimbalyst extracts straight into the app's
+ * user-data `extensions/{id}/` directory, so `manifest.json` has to sit at the top level
  * of the archive -- not one directory deep. A release that carries a broken asset
  * is a hard install failure and does *not* fall back to the clone path, so this
  * script re-opens what it wrote and checks it before leaving it on disk.

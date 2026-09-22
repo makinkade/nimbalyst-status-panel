@@ -127,7 +127,7 @@ Settings → Extensions → Marketplace → **Install from GitHub**, and paste:
 https://github.com/makinkade/nimbalyst-status-panel
 ```
 
-Nimbalyst resolves `/releases/latest`, downloads the `.nimext` asset and extracts it to `~/.nimbalyst/extensions/com.mkinkade.status-panel/`. Re-pasting the same URL upgrades in place — there is no uninstall step.
+Nimbalyst resolves `/releases/latest`, downloads the `.nimext` asset and extracts it to `<user-data>/extensions/com.mkinkade.status-panel/` — where `<user-data>` is `%APPDATA%\@nimbalyst\electron` on Windows, `~/Library/Application Support/@nimbalyst/electron` on macOS and `~/.config/@nimbalyst/electron` on Linux. Re-pasting the same URL upgrades in place — there is no uninstall step.
 
 `v0.1.3` is the published release, so this path works. Note that it needs a release and **fails rather than degrading without one**: with no release Nimbalyst falls back to cloning the source, which requires a committed `dist/`, and `dist/` is deliberately gitignored here — that fallback would report *"Extension repository does not include a built dist/ directory."* See [Releasing](#releasing) for how the asset gets there.
 
@@ -159,7 +159,7 @@ npm run package          # clean build -> build/status-panel-<version>.nimext + 
 npm run package -- --no-build   # package the dist/ already on disk
 ```
 
-A `.nimext` is a zip Nimbalyst extracts straight into `~/.nimbalyst/extensions/{id}/`, so `manifest.json` has to be at the **top level** of the archive rather than one directory deep. What ships:
+A `.nimext` is a zip Nimbalyst extracts straight into its user-data `extensions/{id}/` directory, so `manifest.json` has to be at the **top level** of the archive rather than one directory deep. What ships:
 
 ```
 manifest.json
