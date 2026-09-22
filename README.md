@@ -4,6 +4,12 @@
 
 A Nimbalyst bottom panel that mirrors the Claude Code CLI status line (`~/.claude/statusline.ps1`) for the active Agent session, so SDK-backed sessions show the same information the terminal REPL does.
 
+![The chip strip on a dark theme: model, effort, permission mode, directory, branch, context usage and Claude plan limits](screenshots/status-panel-dark.png)
+
+![The same chip strip on a light theme](screenshots/status-panel-light.png)
+
+Both themes, captured at 1:1 from the running panel — dark above, light below. Nothing is scaled, so the bars are as legible as they actually are; see [Light and dark](#light-and-dark).
+
 **Status:** installed and running in Nimbalyst, verified on screen against live Claude Code and Codex sessions. Several checks are still open — see [Verification checklist](#verification-checklist).
 
 ## Claude Code only
@@ -159,6 +165,8 @@ A `.nimext` is a zip Nimbalyst extracts straight into `~/.nimbalyst/extensions/{
 manifest.json
 dist/index.js
 dist/index.css
+screenshots/status-panel-dark.png
+screenshots/status-panel-light.png
 README.md
 LICENSE
 ```
@@ -198,11 +206,21 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
 4. **Non-Claude providers.** Still Claude-first, but no longer silently misleading — see [Claude Code only](#claude-code-only) and the marketplace `longDescription`. ~~Still to decide: hide the irrelevant chips or show honest placeholders.~~ Decided in GET-103, for honest placeholders: beside a session whose provider is not `claude-code`, the plan chips relabel to `Claude 5h` / `Claude 7d` / `Claude 7d Fable`, render in the muted accent rather than green/yellow/red, and name the session's actual provider in their tooltip. `src/lib/provider.ts` resolves the provider from `session.provider`, falling back to the `provider:` prefix of the model id; a provider it cannot determine leaves the chips alone, so only a positive non-Claude signal demotes them. What stays genuinely provider-specific is the Model chip's name fallback, and the fact that no other provider's quota is reported at all.
-5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). ~~Version and author identity~~ are done too (GET-93) — see [Published identity](#published-identity). Still open: `screenshots` (an external extension must bundle real `src` PNGs — `fileToOpen`/`selector` drive the internal capture pipeline only). `screenshots/` is already in the packaging script's file list, so it will ship as soon as the PNGs land.
+5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). ~~Version and author identity~~ are done too (GET-93) — see [Published identity](#published-identity). ~~`screenshots`~~ are done too (GET-94) — `screenshots/status-panel-dark.png` and `-light.png`, wired as one entry's `src` and `srcLight`. An external extension must bundle real PNGs: `fileToOpen`/`selector` drive the internal capture pipeline only, and the registry's own `extensions.nimbalyst.com/screenshots/<id>/` is an R2 bucket nobody outside Nimbalyst can write to. `screenshots/` was already in the packaging script's file list, so the PNGs ship with the `.nimext` as well as heading this README.
 
 Publishing route is settled: **the registry is first-party only.** Every live entry is authored by Nimbalyst under `com.nimbalyst.*`, and `registry.json` is a generated artifact pushed to Nimbalyst's own R2 bucket rather than a file anyone can PR — being listed means a maintainer adds a local path to `packages/marketplace/release-extensions.txt`, which is a favour rather than a process. The docs' offer to "publish an extension you built yourself" has no workflow behind it.
 
 The supported route is the app's own **Install from GitHub**: a public repo whose tagged releases carry a `.nimext` asset, which is what [Install](#install) documents. The `marketplace` block stays in `manifest.json` either way — the registry generator reads it straight from the manifest, so nothing needs redoing if the route ever opens. (The `marketplace.json` constant in the app bundle points at `anthropics/claude-plugins-official` — that is Claude plugins, a different system.)
+
+## Light and dark
+
+`src/lib/thresholds.ts` keeps the Night Owl palette literal — the point of the port is that a bar which is red in the terminal is red here — and the panel draws it over whatever surface the host theme provides. Those two facts have already collided once: the stale/unavailable bar used `PALETTE.light` (`#d6deeb`), which is Night Owl's *foreground*, meant to sit on dark navy. On a light theme a full bar in it was indistinguishable from an empty one. That path is now `MUTED`, i.e. `var(--nim-text-muted)`, which follows the theme instead of fighting it.
+
+The two captures above are the standing check. They are the same session 23 seconds apart with nothing changed but the theme, so a fill that vanishes on one surface shows up as a difference between two images rather than as a bug report.
+
+What they actually cover is the green and yellow thresholds on a populated session — Context at 13 %, 5h at 24 %, 7d at 53 % — and the `No scoped caps` empty state. Two things they do not: the red band above 70/80 %, and the `MUTED` rendering itself, which needs either a stale reading or a non-Claude session to appear. Those are covered by tests (`src/StatusPanel.test.tsx`) and, for the non-Claude case, by an on-screen check in GET-103; they are not in these PNGs. Re-capture when a threshold colour changes.
+
+Cropped to the panel's own bounds. The window around it is not the subject, and a full-window capture would date itself against every unrelated change to the rest of the app.
 
 ## Verification checklist
 
@@ -214,7 +232,7 @@ Nothing below has been exercised against a running instance yet.
 - [ ] Usage bars show plausible percentages and reset stamps, including the scoped `7d Fable` bar
 - [x] Usage endpoint reachable from the renderer, credentials read, cache written atomically and read back by `Get-PlanUsage`
 - [x] `statusline.ps1` still renders correctly after the extraction
-- [ ] Light and dark themes both legible
+- [x] Light and dark themes both legible — captured at 1:1 on both surfaces, green and yellow thresholds plus the `No scoped caps` empty state (GET-94); see [Light and dark](#light-and-dark) for what those two images do *not* cover
 - [ ] Empty states: no session, not a git repo, usage unavailable offline
 - [x] The plan chips degrade to `Claude 5h` in the muted accent beside a non-Claude session, keeping the number and dropping the urgency colour (GET-103) — `src/StatusPanel.test.tsx`, `src/lib/provider.test.ts`
 - [x] The same degradation seen on screen in the running panel after a restart (GET-103)

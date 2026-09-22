@@ -116,6 +116,17 @@ for (const field of ['main', 'styles']) {
   }
 }
 
+// A screenshot path that resolves to nothing is a broken image in the listing
+// rather than a failed install, so it would otherwise ship unnoticed.
+for (const [i, shot] of (manifest.marketplace?.screenshots ?? []).entries()) {
+  for (const field of ['src', 'srcLight']) {
+    const rel = shot[field];
+    if (rel && !entries.some((e) => e.rel === rel)) {
+      fail(`marketplace.screenshots[${i}].${field} points at "${rel}", which is not in the package`);
+    }
+  }
+}
+
 const zip = new AdmZip();
 for (const { abs, rel } of entries) zip.addFile(rel, fs.readFileSync(abs));
 
