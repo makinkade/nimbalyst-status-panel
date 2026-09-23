@@ -11,6 +11,12 @@ export const PALETTE = {
   teal: '#21c7a8',
   blue: '#82AAFF',
   purple: '#c792ea',
+  /**
+   * Night Owl's foreground and background. Kept so the port is a complete
+   * record of the script's palette, but neither is an accent: they are a
+   * matched pair meant for each other, so against the *host's* surfaces they
+   * have almost no contrast at all. Use NEUTRAL or MUTED instead.
+   */
   light: '#d6deeb',
   navy: '#011627',
 } as const;
@@ -38,7 +44,9 @@ export function permissionModeColor(label: string): string {
     case 'Bypass':
       return PALETTE.red;
     default:
-      return PALETTE.light;
+      // `Default` is a known value, not an unvouched-for one, so it takes the
+      // theme's foreground rather than MUTED -- see NEUTRAL below.
+      return NEUTRAL;
   }
 }
 
@@ -50,6 +58,23 @@ export function permissionModeColor(label: string): string {
  * in it reads as an empty one. This follows the host theme instead.
  */
 export const MUTED = 'var(--nim-text-muted)';
+
+/**
+ * For values that are known and simply unremarkable -- the `Default` permission
+ * mode being the only one so far.
+ *
+ * PALETTE.light is Night Owl's *foreground*, and using it as an accent is the
+ * same mistake MUTED was introduced to fix one layer down: at 1.2:1 against the
+ * light theme's chip surface the icon and accent border vanish, so the chip
+ * reads as though it had no accent at all while every neighbour has one. The
+ * themed foreground is what PALETTE.light was reaching for, and it stays legible
+ * on both themes by construction.
+ *
+ * Deliberately not MUTED: that means "the panel cannot vouch for this", and a
+ * known mode must not look like the `Mode -` placeholder standing in for a
+ * missing one.
+ */
+export const NEUTRAL = 'var(--nim-text)';
 
 export const BAR_LENGTH = 10;
 

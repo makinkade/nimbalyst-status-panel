@@ -372,8 +372,16 @@ export async function getModels(): Promise<ModelInfo[]> {
   return [];
 }
 
+/**
+ * `invokeQuiet`, not `invoke`: this is polled every five seconds for as long as
+ * the panel is open, and a host that cannot answer the channel at all rejects
+ * every time -- a warning every five seconds, precisely in the situation the
+ * user can do least about. The outcome is not lost, it just stops going to the
+ * console: a missing reading now renders as the muted `5h -` / `7d -`
+ * placeholder, whose tooltip says which link in the chain is missing.
+ */
 export async function getUsage(): Promise<ClaudeUsage | null> {
-  return invoke<ClaudeUsage>('claude-usage:get');
+  return invokeQuiet<ClaudeUsage>('claude-usage:get');
 }
 
 /**

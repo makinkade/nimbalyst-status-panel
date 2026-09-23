@@ -151,9 +151,15 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
       </Chip>
     ),
 
-    directory: (
+    directory: displayPath ? (
       <Chip icon="folder" accent={PALETTE.blue} title={workspacePath}>
         {displayPath}
+      </Chip>
+    ) : (
+      // No workspace path at all -- `folderName('')` is `''`, which rendered a
+      // chip holding nothing but its icon. Say what is missing instead.
+      <Chip icon="folder" accent={MUTED} title="No workspace folder open">
+        <span className="sp-label">No folder</span>
       </Chip>
     ),
 
@@ -202,8 +208,16 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
         </Chip>
       ),
 
-    usage5h: renderBar(bars.fiveHour),
-    usage7d: renderBar(bars.sevenDay),
+    usage5h: bars.fiveHour ? (
+      <UsageChip bar={bars.fiveHour} />
+    ) : (
+      <MissingBar label="5h" icon="schedule" planUsage={planUsage} usage={usage} />
+    ),
+    usage7d: bars.sevenDay ? (
+      <UsageChip bar={bars.sevenDay} />
+    ) : (
+      <MissingBar label="7d" icon="calendar_month" planUsage={planUsage} usage={usage} />
+    ),
     usageScoped: bars.scoped.length ? (
       bars.scoped.map((bar) => <UsageChip key={bar.key} bar={bar} />)
     ) : (
@@ -253,8 +267,47 @@ function describeMissingContext(
   return 'Context unavailable';
 }
 
-function renderBar(bar: UsageBar | null): ReactNode {
-  return bar ? <UsageChip bar={bar} /> : null;
+/**
+ * A usage window with no reading behind it.
+ *
+ * These two segments used to render `null`, so a segment the user had switched
+ * *on* simply was not there -- indistinguishable from one hidden in the config
+ * popover, and the only segments to behave that way: mode, branch, context and
+ * scoped caps all degrade to a muted placeholder that says why. This gives 5h
+ * and 7d the same one.
+ */
+function MissingBar({
+  label,
+  icon,
+  planUsage,
+  usage,
+}: {
+  label: string;
+  icon: string;
+  planUsage: Status['planUsage'];
+  usage: Status['usage'];
+}) {
+  return (
+    <Chip icon={icon} accent={MUTED} title={describeMissingUsage(label, planUsage, usage)}>
+      <span className="sp-label">{label} —</span>
+    </Chip>
+  );
+}
+
+/** Which link in the usage chain is missing, so the tooltip is a diagnosis. */
+function describeMissingUsage(
+  label: string,
+  planUsage: Status['planUsage'],
+  usage: Status['usage'],
+): string {
+  if (planUsage) return `The last plan-usage reading carried no ${label} window.`;
+  if (usage?.error) return `Usage unavailable: ${usage.error}`;
+  if (usage) return `claude-usage:get returned no ${label} window.`;
+  return (
+    `No ${label} reading: the Anthropic usage endpoint is unreachable and claude-usage:get ` +
+    'returned nothing either. Reading your plan directly needs the Claude credentials file, ' +
+    "so this is also what it looks like when the extension's filesystem permission is denied."
+  );
 }
 
 /**
