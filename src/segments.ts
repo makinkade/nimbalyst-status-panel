@@ -53,12 +53,24 @@ export interface SegmentConfig {
    * opens it itself. See `autoOpenPanel` in index.ts.
    */
   autoOpen: boolean;
+  /**
+   * Ask github.com whether a newer release of this extension exists.
+   *
+   * On by default, because Nimbalyst never updates a GitHub-installed
+   * extension on its own and the alternative is staying on whatever version you
+   * first installed forever. Off is a real preference rather than a courtesy
+   * one: this is the only thing the panel does that reaches an address the user
+   * did not open, and some people will not want an extension doing that. When
+   * it is off no request is made at all -- the chip is not merely hidden.
+   */
+  checkForUpdates: boolean;
 }
 
 export const DEFAULT_CONFIG: SegmentConfig = {
   order: [...SEGMENT_IDS],
   hidden: [],
   autoOpen: true,
+  checkForUpdates: true,
 };
 
 /**
@@ -85,8 +97,12 @@ export function normalizeConfig(stored: unknown): SegmentConfig {
   // default rather than reading `undefined` as "off".
   const autoOpen =
     typeof candidate.autoOpen === 'boolean' ? candidate.autoOpen : DEFAULT_CONFIG.autoOpen;
+  const checkForUpdates =
+    typeof candidate.checkForUpdates === 'boolean'
+      ? candidate.checkForUpdates
+      : DEFAULT_CONFIG.checkForUpdates;
 
-  return { order, hidden, autoOpen };
+  return { order, hidden, autoOpen, checkForUpdates };
 }
 
 export function moveSegment(order: SegmentId[], id: SegmentId, delta: number): SegmentId[] {

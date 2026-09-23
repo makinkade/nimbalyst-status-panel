@@ -161,6 +161,27 @@ export function ConfigChip({ config, labels, descriptions, onChange, onReset }: 
                   <span>Open on startup</span>
                 </label>
               </li>
+              <li className="sp-popover-row">
+                <label
+                  className="sp-popover-label"
+                  title={
+                    'Ask github.com every few hours whether a newer release of this extension ' +
+                    'exists, and show a chip when one does. Nimbalyst never updates a ' +
+                    'GitHub-installed extension on its own, so without this you stay on the ' +
+                    'version you installed. Nothing appears while you are up to date, and turning ' +
+                    'this off stops the request being made at all.'
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={config.checkForUpdates}
+                    onChange={() =>
+                      onChange({ ...config, checkForUpdates: !config.checkForUpdates })
+                    }
+                  />
+                  <span>Check for updates</span>
+                </label>
+              </li>
             </ul>
           </div>,
           document.body,

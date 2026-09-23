@@ -1,6 +1,7 @@
 import { Fragment, ReactNode } from 'react';
 import { Bar, Chip } from './components/Chip';
 import { ConfigChip } from './components/ConfigChip';
+import { UpdateChip } from './components/UpdateChip';
 import {
   folderName,
   formatCountdown,
@@ -17,6 +18,7 @@ import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from '.
 import { SegmentId } from './segments';
 import { PanelStorage, useSegmentConfig } from './useSegmentConfig';
 import { Status, useStatus } from './useStatus';
+import { useUpdateCheck } from './useUpdateCheck';
 import './styles.css';
 
 interface PanelHost {
@@ -51,6 +53,7 @@ export function StatusPanel({ host }: { host: PanelHost }) {
   const workspacePath = host.getPrimaryFolderPath?.() ?? host.workspacePath;
   const status = useStatus(workspacePath);
   const { config, update, reset } = useSegmentConfig(host.storage);
+  const availableUpdate = useUpdateCheck(host.storage, config.checkForUpdates);
 
   // Name the scoped-caps row after the caps actually in force, so the config
   // list says "Model caps (7d Fable)" rather than something abstract.
@@ -82,6 +85,19 @@ export function StatusPanel({ host }: { host: PanelHost }) {
           Usage unavailable
         </Chip>
       )}
+
+      {/*
+        Outside the configurable segment list on purpose. The segments describe
+        the focused session and are ordered against each other; this describes
+        the extension itself, appears on the handful of days a release lands,
+        and is governed by its own Behavior setting rather than by a visibility
+        checkbox. Putting it in `order` would also break the invariant the
+        empty-state tests hold every segment to -- that a configured segment
+        always renders something saying why it is empty -- which this one
+        deliberately does not. It sits beside the gear for the same reason the
+        gear does: it is about the panel, not about the session.
+      */}
+      {availableUpdate && <UpdateChip update={availableUpdate} />}
 
       <ConfigChip
         config={config}

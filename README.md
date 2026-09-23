@@ -29,6 +29,14 @@ Open the panel from its icon in the left rail, or toggle it with **Ctrl+Shift+S*
 
 The gear chip at the end of the strip opens a picker for which segments appear and in what order. That choice is stored globally, so it follows you from workspace to workspace instead of resetting per project.
 
+## Staying up to date
+
+Nimbalyst does not auto-update extensions installed from GitHub, so the panel checks for itself. Every few hours it asks GitHub whether this repo has a newer release, and if one exists an **Update** chip appears at the end of the strip. Clicking it shows what changed and offers to install — never automatically, and never without you pressing the button. The new version runs after you restart Nimbalyst.
+
+Nothing appears while you are up to date, and nothing appears when the check cannot be made: offline, rate-limited, or unable to read the release, the chip simply does not show. It never becomes an error or a spinner.
+
+The check is a setting — **Behavior → Check for updates** in the gear popover, on by default. Turning it off stops the request being made at all, not just the chip being shown. With it off, re-paste the repo URL into **Install from GitHub** to upgrade by hand.
+
 ## Claude Code support
 
 This version is built for Claude Code sessions. The provider-neutral chips — effort, permission mode, directory, branch and context — work with any session, but plan limits are read from your Anthropic plan, and model names are resolved from Claude Code model ids.

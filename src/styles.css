@@ -201,3 +201,134 @@
   padding-top: 8px;
   border-top: 1px solid var(--nim-border);
 }
+
+/* ── Update chip ─────────────────────────────────────────────────────────── */
+
+.sp-update {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Chip-shaped, but a button: the whole point is that it is pressable. */
+.sp-update-button {
+  font: inherit;
+  cursor: pointer;
+  color: var(--nim-text);
+}
+
+.sp-update-button:hover {
+  background: var(--nim-bg-hover);
+}
+
+.sp-update-popover {
+  width: 280px;
+}
+
+.sp-update-summary {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sp-update-note {
+  margin: 0 0 8px;
+  color: var(--nim-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sp-update-ok {
+  color: var(--nim-text);
+}
+
+/*
+ * The one place a colour is warranted: an install that did not happen.
+ * The host's own error colour rather than PALETTE.red, for the GET-97 reason --
+ * this sits on the popover surface on both themes, and a hex literal cannot
+ * know which theme it is on.
+ */
+.sp-update-error {
+  color: var(--nim-error);
+}
+
+.sp-update-link {
+  display: block;
+  margin-bottom: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--nim-primary);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sp-update-link:hover {
+  text-decoration: underline;
+}
+
+.sp-update-action {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--nim-border);
+  border-radius: 6px;
+  background: var(--nim-bg-secondary);
+  color: var(--nim-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sp-update-action:hover:not(:disabled) {
+  background: var(--nim-bg-hover);
+}
+
+.sp-update-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sp-update-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--nim-border);
+  border-radius: 6px;
+  background: var(--nim-bg-secondary);
+}
+
+/* The URL is long and must stay selectable, so it wraps rather than clipping. */
+.sp-update-url code {
+  flex: 1;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.sp-update-url button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--nim-text-muted);
+  cursor: pointer;
+}
+
+.sp-update-url button:hover {
+  background: var(--nim-bg-hover);
+  color: var(--nim-text);
+  border-color: var(--nim-border);
+}
+
+.sp-update-url .material-symbols-outlined {
+  font-size: 14px;
+}

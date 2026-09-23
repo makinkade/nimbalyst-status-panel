@@ -41,7 +41,12 @@ src/
   segments.ts         # segment registry, default order, config reconciliation
   useSegmentConfig.ts # load/save config via host.storage global scope
   lib/ipc.ts          # typed, failure-tolerant wrapper over electronAPI
+  useUpdateCheck.ts   # is there a newer GitHub release? -- cached, throttled, silent
+  components/UpdateChip.tsx # the update chip, its confirmation and the manual fallback
   lib/planUsage.ts    # reads the credentials file and calls the usage API directly
+  lib/releaseCheck.ts # GitHub releases client: version parsing, cache, throttle
+  lib/marketplace.ts  # install / install-record / open-external, past the SDK contract
+  lib/buildInfo.ts    # manifest version and repositoryUrl, baked in at build time
   lib/format.ts       # formatTokens / formatResetTime / labels, ported from the .ps1
   lib/thresholds.ts   # Night Owl palette + bar thresholds, ported from the .ps1
 ```
@@ -74,6 +79,28 @@ src/
 Failures are quiet by design — no credentials, unreadable file, network error, 401, 429 — and fall back to the last cached reading, whose older timestamp is what makes the chips render as stale. That includes the console: the usage path reaches the host through `invokeQuiet`, so a channel the host cannot answer costs a `console.debug` rather than a `console.warn` every minute the panel is open. `claude-usage:get` remains the fallback when there is no reading at all, in which case the scoped bars are simply absent.
 
 Formatting, thresholds, and the palette are ported verbatim so a bar that is red in the terminal is red here.
+
+### Self-update check
+
+Nimbalyst never auto-updates a GitHub-installed extension. `checkForUpdates()` in `ExtensionMarketplaceHandlers.ts` walks every install record, including `source: 'github-url'` ones, but only matches them against **registry** entries by id and then installs from the registry's `downloadUrl` — so an extension that is not in the registry never matches, and `runExtensionAutoUpdate()` skips it silently on every startup, forever. The install record does persist `githubUrl`, `githubReleaseTag` and `githubInstallMethod`; nothing in the host reads them back. Since we ship via GitHub rather than the registry, closing that is ours to do (GET-99).
+
+**Detecting.** `src/lib/releaseCheck.ts` polls `https://api.github.com/repos/<owner>/<repo>/releases/latest` and compares `tag_name` against the manifest version, which `vite.config.ts` bakes into the bundle as `__PANEL_VERSION__` — the version of the code actually executing, rather than the one the install record claims. Which repo gets asked comes from the install record's `githubUrl` when there is one, so someone running a fork is offered their fork's releases; the manifest's `repositoryUrl` is the fallback, and the only answer for a symlinked dev install.
+
+The same discipline as the usage client, for the same reason — a shared, rate-limited endpoint:
+
+- **Six-hour TTL, persisted.** Unauthenticated GitHub is 60 requests an hour *per IP*, shared with everything else on the machine. The reading is stored in global extension storage under `releaseCheck`, so restarting Nimbalyst does not spend a request. The first check is delayed 8 s so panel storage has hydrated and the read is a real one.
+- **A half-hour floor and a shared in-flight promise**, which is what holds when there is no storage to hold the TTL.
+- **Only a completed check advances `checkedAt`.** A failure that stamped it would read as a fresh "no update" and suppress the next six hours of checks on the strength of an outage.
+- **Stable releases only.** Version parsing is anchored, so `v0.2.0-beta.1` does not parse at all rather than comparing as `0.2.0` and offering a beta build to someone who installed a stable one.
+- **Fail silent.** Offline, rate-limited, repo renamed, malformed body, unparseable tag — every one of them resolves to "no chip". None may produce an error state or a spinner in the strip. This is the one segment with no empty-state placeholder, and deliberately so: the other segments describe values that always exist and are merely unavailable, whereas "no newer release" is the ordinary condition of being up to date, not a missing reading.
+
+**Installing.** `extension-marketplace:install-from-github` is reachable from an extension, and structurally rather than accidentally: the preload exposes `invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args)` with **no channel allowlist**, and the handler is registered main-side with `ipcMain.handle`. Nothing sits between the two to refuse it. Reinstall-over-existing needs no uninstall step — `installFromPackageUrl` does `fs.rm(finalInstallPath, { recursive: true, force: true })` and renames staging into place.
+
+That is reachability, not a promise. No bundled or third-party extension calls these channels, so this is not an established pattern and therefore not a supported one; it can break on any Nimbalyst release without that counting as a regression on their side. `docs/EXTENSION_ARCHITECTURE.md` is explicit that the capability table is "an API contract, not a sandbox" — possible by design, still past the contract. So everything in `lib/marketplace.ts` degrades to the manual path: a call that cannot be made, or comes back shaped wrong, ends as `installed: false` and the popover shows the paste-this-URL instructions, which are on screen the whole time rather than appearing only after a failure.
+
+A successful install does not become the running code — the bundle was evaluated at startup — so the popover asks for a restart rather than claiming the update is live.
+
+**Consent.** `checkForUpdates` in the segment config, default on, in the popover's Behavior group. Off means no request is made at all, not merely that the chip is hidden; it is the only thing the panel does that reaches an address the user did not open.
 
 ## Releasing
 
