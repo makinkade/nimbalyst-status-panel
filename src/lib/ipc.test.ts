@@ -14,6 +14,7 @@ import {
   extractLastReadAt,
   extractTokenUsage,
   getFocusedSession,
+  getGitInfo,
   invoke,
   invokeQuiet,
   selectedSessionId,
@@ -505,5 +506,63 @@ describe('getFocusedSession read-state fallback', () => {
     const session = await getFocusedSession(WS, null);
 
     expect(session?.id).toBe('busier');
+  });
+});
+
+/**
+ * GET-98: the `No repo` placeholder was unreachable in the real app.
+ *
+ * `emptyStates.test.tsx` hands `buildSegments` a `repoPath: null` directly, so
+ * it proved the chip renders but never that anything produces that state.
+ * Nothing did: `git:is-repo` answers `{ success, isRepo }`, and reading that
+ * object as a boolean made a folder with no `.git` anywhere above it resolve as
+ * a repo whose branch could not be read -- `Branch —` rather than `No repo`.
+ * Seen on screen in a non-git workspace before this was fixed.
+ */
+describe('getGitInfo', () => {
+  function routeGit(isRepoAnswer: unknown): void {
+    bridgeInvoke.mockImplementation(async (channel: string) => {
+      if (channel === 'git:is-repo') return isRepoAnswer;
+      if (channel === 'git:branches') return { branches: [], current: '' };
+      if (channel === 'git:get-uncommitted-files') return { success: true, files: [] };
+      return null;
+    });
+  }
+
+  it('reads the wrapper rather than its truthiness', async () => {
+    routeGit({ success: true, isRepo: false });
+
+    await expect(getGitInfo(WS)).resolves.toEqual({
+      repoPath: null,
+      branch: null,
+      dirtyCount: 0,
+    });
+  });
+
+  it('treats a failed check as not a repo, not as a branchless one', async () => {
+    routeGit({ success: false, error: 'spawn git ENOENT', isRepo: false });
+
+    expect((await getGitInfo(WS)).repoPath).toBeNull();
+  });
+
+  it('says nothing is a repo when the channel is missing entirely', async () => {
+    routeGit(null);
+
+    expect((await getGitInfo(WS)).repoPath).toBeNull();
+  });
+
+  it('still resolves a real repo through the same wrapper', async () => {
+    bridgeInvoke.mockImplementation(async (channel: string) => {
+      if (channel === 'git:is-repo') return { success: true, isRepo: true };
+      if (channel === 'git:branches') return { branches: ['master'], current: 'master' };
+      if (channel === 'git:get-uncommitted-files') return { success: true, files: ['a', 'b'] };
+      return null;
+    });
+
+    await expect(getGitInfo(WS)).resolves.toEqual({
+      repoPath: WS,
+      branch: 'master',
+      dirtyCount: 2,
+    });
   });
 });

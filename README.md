@@ -222,20 +222,25 @@ The two captures above are the standing check. They are the same session 23 seco
 
 What they actually cover is the green and yellow thresholds on a populated session — Context at 13 %, 5h at 24 %, 7d at 53 % — and the `No scoped caps` empty state. Two things they do not: the red band above 70/80 %, and the `MUTED` rendering itself, which needs either a stale reading or a non-Claude session to appear. Those are covered by tests (`src/StatusPanel.test.tsx`) and, for the non-Claude case, by an on-screen check in GET-103; they are not in these PNGs. Re-capture when a threshold colour changes.
 
+The red band has since been seen on the light theme anyway, incidentally rather than by arrangement: GET-98's checks ran with the 5h window at 83 %, and the bar read as clearly red against the light chip surface. That is one of the two gaps closed by observation, though not by these images.
+
 Cropped to the panel's own bounds. The window around it is not the subject, and a full-window capture would date itself against every unrelated change to the rest of the app.
 
 ## Verification checklist
 
-Nothing below has been exercised against a running instance yet.
+Worked through against the running panel on 2026-09-23 (GET-98). A ticked item
+was seen on screen in this app; where a test is the whole of the evidence, the
+item says so.
 
-- [ ] Panel appears in the bottom panel and under `Ctrl+Shift+S`
-- [ ] Model, effort, permission mode, directory, branch populate
-- [ ] Context bar tracks a live session (the one source not yet confirmed — if `metadata.tokenUsage` lags, fall back to parsing the session JSONL as the script does)
-- [ ] Usage bars show plausible percentages and reset stamps, including the scoped `7d Fable` bar
+- [x] Panel appears in the bottom panel and under `Ctrl+Shift+S` — the strip sits below the editor, wrapping to a second row at this window width, and `Ctrl+Shift+S` hides it and brings it back. One catch worth knowing: the keybinding acts on whatever has focus, so sent at a window whose editor had focus it did nothing. In a window you have just opened, the panel's icon in the left rail is what mounts it.
+- [x] Model, effort, permission mode, directory, branch populate — `Opus 5 (1M) · High · Auto · nimbalyst-status-panel · master` in this repo, and `Sonnet 5 · High · Auto · Nimbalyst Tutorial` in a second workspace, so none of the five is reading a constant. The branch chip drops its `±n` on a clean tree rather than showing `±0`.
+- [x] Context bar tracks a live session — it moved 7 % → 8 % → 11 % across this session's own turns, matching `currentContext.tokens` in `ai_sessions.metadata` at every reading (75,914 → 80,114 → 108,707 of 1M). `metadata.tokenUsage` does not lag, so the JSONL fallback this item used to hedge about is not needed. What is *not* live is the `↑input ↓output` pair beside the percentage: it reads `↑0 ↓0` for the whole of a running session, and every finished session in the store has real counts. The percentage — the part the bar draws — is the live half.
+- [x] Usage bars show plausible percentages and reset stamps — `5h 53 % ↻10:39` and `7d 63 % ↻Fri 04:59`, the same figures the endpoint's cache held, with both `resets_at` values (`14:39:59Z` and `Sep 25 08:59:59Z`) rendered in local time.
+- [ ] The scoped `7d Fable` bar specifically — **not observable on this account**, rather than unchecked. The endpoint's `limits[]` currently carries only the `session` and `weekly` groups and neither has a `scope.model`, so `scopedLimits()` yields nothing and the chip correctly reads `No scoped caps`. Closing this needs an account that has a model-scoped cap; another pass here will not do it.
 - [x] Usage endpoint reachable from the renderer, credentials read, cache written atomically and read back by `Get-PlanUsage`
 - [x] `statusline.ps1` still renders correctly after the extraction
 - [x] Light and dark themes both legible — captured at 1:1 on both surfaces, green and yellow thresholds plus the `No scoped caps` empty state (GET-94); see [Light and dark](#light-and-dark) for what those two images do *not* cover
-- [ ] Empty states: no session, not a git repo, usage unavailable offline
+- [x] Empty states: no session, not a git repo, usage unavailable offline — all of them, plus the denied-permission case, are covered by `src/emptyStates.test.tsx` (GET-97). Three are also confirmed on screen, in a workspace with no `.git` and an unprompted session: `No repo`, `Context —` and `No scoped caps` together in one strip. `not a git repo` got there the hard way — it rendered as `Branch —` until GET-98, see [What the checklist turned up](#what-the-checklist-turned-up). The offline reading is the one still resting on its test alone.
 - [x] The plan chips degrade to `Claude 5h` in the muted accent beside a non-Claude session, keeping the number and dropping the urgency colour (GET-103) — `src/StatusPanel.test.tsx`, `src/lib/provider.test.ts`
 - [x] The same degradation seen on screen in the running panel after a restart (GET-103)
 - [x] A session from another provider renders every segment rather than throwing — `src/StatusPanel.test.tsx` builds the strip from the record Nimbalyst wrote for a real `openai-codex` session (GET-89)
@@ -243,6 +248,37 @@ Nothing below has been exercised against a running instance yet.
 - [x] `npm run package` produces an archive whose top-level `manifest.json` parses under an independent zip reader, with no `src/` or source maps in it
 - [x] `v0.1.3` published by the release workflow, and the app's own resolve-download-extract path replayed against it: `/releases/latest` returns the tag, `selectReleaseAsset` picks the `.nimext`, it extracts with `manifest.json` on top and `dist/` where the manifest points, both `screenshots/` PNGs are present at the sizes the manifest points to, and the published `.sha256` matches the published asset
 - [ ] The same thing on a *clean* machine, through the real UI rather than a replay of its logic — Windows (GET-95) and macOS/Linux (GET-96)
+
+### What the checklist turned up
+
+`getGitInfo` read `git:is-repo` as a `boolean`. The channel answers with a
+wrapper — `{ success: true, isRepo }`, or `{ success: false, error, isRepo:
+false }` when the check throws — so the answer is an object, and truthy
+whichever way it answers. Every folder therefore resolved as a repo: a
+workspace with no `.git` anywhere above it showed `Branch —` and the tooltip
+`git:branches returned no current branch`, when the truth was that there was no
+repository at all. The `No repo` half of that chip could not be reached in the
+running app.
+
+The empty-state suite did not catch it because it hands `buildSegments` a
+`repoPath: null` directly. That proves the placeholder renders; it cannot prove
+anything ever produces the state. The gap was only visible by opening a
+workspace that is not a repo and looking at the strip. `src/lib/ipc.test.ts`
+now covers `getGitInfo` against the shape the channel actually sends, and the
+chip was checked on screen both ways after the fix: `No repo` in a folder with
+no `.git`, `master ±3` in this repo with three files modified.
+
+Worth repeating for anyone verifying a change here: a rebuild is not enough and
+neither is `extension_reload`. Both were done before that check and the
+renderer went on running the previous day's bundle — visibly polling, with the
+usage bar climbing — so the fix appeared not to work. Only restarting the app
+picked it up.
+
+Worth carrying forward when another channel is added: the three git channels do
+not agree with one another. `git:is-repo` and `git:get-uncommitted-files` wrap
+their answers in `{ success, ... }`; `git:branches` returns `{ branches, current
+}` bare. Each has to be read on its own terms, which is why `invoke` stays a
+thin pass-through instead of unwrapping centrally.
 
 ## License
 

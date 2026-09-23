@@ -512,9 +512,26 @@ export interface GitInfo {
   dirtyCount: number;
 }
 
+/**
+ * `git:is-repo` answers with a wrapper, not a boolean.
+ *
+ * Both branches of the handler return an object -- `{ success: true, isRepo }`
+ * or `{ success: false, error, isRepo: false }` -- so the answer is truthy
+ * whatever it says, and reading it as a `boolean` made every folder a repo.
+ * The app's own callers spell this `Boolean(result?.success && result.isRepo)`;
+ * this is that. `git:branches` and `git:get-uncommitted-files` sit either side
+ * of it and disagree about the convention -- the first returns `{ branches,
+ * current }` bare, the second `{ success, files }` -- which is why this is
+ * checked per channel rather than unwrapped centrally in `invoke`.
+ */
+interface IsRepoResponse {
+  success?: boolean;
+  isRepo?: boolean;
+}
+
 export async function getGitInfo(workspacePath: string): Promise<GitInfo> {
-  const isRepo = await invoke<boolean>('git:is-repo', workspacePath);
-  if (!isRepo) return { repoPath: null, branch: null, dirtyCount: 0 };
+  const isRepo = await invoke<IsRepoResponse>('git:is-repo', workspacePath);
+  if (!isRepo?.success || !isRepo.isRepo) return { repoPath: null, branch: null, dirtyCount: 0 };
 
   const branches = await invoke<{ current?: string }>('git:branches', workspacePath);
   const uncommitted = await invoke<unknown>('git:get-uncommitted-files', workspacePath);
