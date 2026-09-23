@@ -105,6 +105,7 @@ export function StatusPanel({ host }: { host: PanelHost }) {
         descriptions={SEGMENT_DESCRIPTIONS}
         onChange={update}
         onReset={reset}
+        updateVersion={availableUpdate?.release.version ?? null}
       />
     </div>
   );

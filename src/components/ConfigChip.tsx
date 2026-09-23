@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { panelVersion } from '../lib/buildInfo';
 import { SegmentConfig, SegmentId, moveSegment } from '../segments';
 
 interface ConfigChipProps {
@@ -10,11 +11,65 @@ interface ConfigChipProps {
   descriptions: Record<SegmentId, string>;
   onChange: (next: SegmentConfig) => void;
   onReset: () => void;
+  /**
+   * The version a newer release offers, when one is known.
+   *
+   * Passed in rather than read here so the popover does not run a second update
+   * check of its own: the strip already holds that state, and one reading
+   * shared is what keeps the footer and the update chip from ever disagreeing.
+   */
+  updateVersion?: string | null;
 }
 
 const POPOVER_WIDTH = 250;
 const POPOVER_MAX_HEIGHT = 260;
 const GAP = 6;
+
+/**
+ * Which copy of the panel you are running (GET-106).
+ *
+ * The gear popover is the right home for it: it is already the only surface
+ * about the panel itself rather than about the focused session, and the update
+ * setting is right above. Before this, GET-99's update chip could say a newer
+ * release existed while nothing anywhere named the version you were on -- so
+ * "should I update?" was a question the panel raised and could not answer.
+ *
+ * When an update is known the two versions are shown together, because that is
+ * the one moment the current version is worth more than as a footnote. The
+ * plain version stays the default shape: being up to date is the common case
+ * and should read as unremarkable.
+ *
+ * Exported for its tests, as `buildSegments` is: the popover it lives in only
+ * mounts on a click, so there is no way to reach it from a static render.
+ */
+export function VersionFooter({ updateVersion }: { updateVersion: string | null }) {
+  const version = panelVersion();
+
+  // Only outside a real `vite build`, where the define step that supplies
+  // `__PANEL_VERSION__` has not run. Saying so beats a dangling "Status Panel"
+  // that looks like a truncated string.
+  if (!version) {
+    return (
+      <div className="sp-popover-version" title="This build was not produced by `npm run build`, so it carries no manifest version.">
+        Status Panel — development build
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="sp-popover-version"
+      title={
+        updateVersion
+          ? `Running ${version}. ${updateVersion} has been released -- the Update chip in the strip will install it.`
+          : `Running ${version}.`
+      }
+    >
+      Status Panel {version}
+      {updateVersion && <span className="sp-popover-version-new"> → {updateVersion} available</span>}
+    </div>
+  );
+}
 
 /**
  * Gear chip: pick which segments appear and in what order.
@@ -23,7 +78,14 @@ const GAP = 6;
  * scroll container (`overflow-y: auto`), which clips absolutely positioned
  * descendants -- an in-flow popover renders but is never visible.
  */
-export function ConfigChip({ config, labels, descriptions, onChange, onReset }: ConfigChipProps) {
+export function ConfigChip({
+  config,
+  labels,
+  descriptions,
+  onChange,
+  onReset,
+  updateVersion = null,
+}: ConfigChipProps) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -183,6 +245,8 @@ export function ConfigChip({ config, labels, descriptions, onChange, onReset }: 
                 </label>
               </li>
             </ul>
+
+            <VersionFooter updateVersion={updateVersion} />
           </div>,
           document.body,
         )

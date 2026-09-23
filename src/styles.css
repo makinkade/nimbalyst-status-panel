@@ -332,3 +332,21 @@
 .sp-update-url .material-symbols-outlined {
   font-size: 14px;
 }
+
+/*
+ * Which copy of the panel is running. Sits under the Behavior group as a
+ * footnote rather than a row: it is information, not a control.
+ */
+.sp-popover-version {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--nim-border);
+  color: var(--nim-text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+/* The one part worth a colour, and only when there is something to act on. */
+.sp-popover-version-new {
+  color: var(--nim-primary);
+}

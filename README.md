@@ -37,6 +37,8 @@ Nothing appears while you are up to date, and nothing appears when the check can
 
 The check is a setting — **Behavior → Check for updates** in the gear popover, on by default. Turning it off stops the request being made at all, not just the chip being shown. With it off, re-paste the repo URL into **Install from GitHub** to upgrade by hand.
 
+The version you are running is named at the foot of that same popover, and when a newer release is known it shows both — `0.1.5 → 0.1.6 available`.
+
 ## Claude Code support
 
 This version is built for Claude Code sessions. The provider-neutral chips — effort, permission mode, directory, branch and context — work with any session, but plan limits are read from your Anthropic plan, and model names are resolved from Claude Code model ids.
