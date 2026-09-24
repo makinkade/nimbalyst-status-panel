@@ -41,6 +41,7 @@ src/
   segments.ts         # segment registry, default order, config reconciliation
   useSegmentConfig.ts # load/save config via host.storage global scope
   lib/ipc.ts          # typed, failure-tolerant wrapper over electronAPI
+  panelKeeper.ts      # put the panel back when the host dismisses it on a mode switch
   useUpdateCheck.ts   # is there a newer GitHub release? -- cached, throttled, silent
   components/UpdateChip.tsx # the update chip, its confirmation and the manual fallback
   lib/planUsage.ts    # reads the credentials file and calls the usage API directly
@@ -79,6 +80,19 @@ src/
 Failures are quiet by design — no credentials, unreadable file, network error, 401, 429 — and fall back to the last cached reading, whose older timestamp is what makes the chips render as stale. That includes the console: the usage path reaches the host through `invokeQuiet`, so a channel the host cannot answer costs a `console.debug` rather than a `console.warn` every minute the panel is open. `claude-usage:get` remains the fallback when there is no reading at all, in which case the scoped bars are simply absent.
 
 Formatting, thresholds, and the palette are ported verbatim so a bar that is red in the terminal is red here.
+
+### Staying open
+
+The host closes our panel and does not reopen it. `setWindowMode` calls `dismissExtensionPanels`, which nulls both the sidebar and the bottom panel id, on **every** mode set — including setting the mode it is already in, which is how the history button and the tracker-navigation handler lose the panel with no mode change at all. Nor is a bottom panel id persisted: `loadActiveExtensionPanel` filters the stored id through `isSidebarPanel`, so there is no host setting that keeps ours up and no manifest flag to ask for one. That is GET-107, and the whole reason `autoOpenPanel` existed in the first place.
+
+So `panelKeeper.ts` watches for it and reopens. The hard part is not fighting a deliberate close, which would leave the panel impossible to dismiss. The host offers exactly three ways to close ours and no more — the `<panelId>.toggle` command behind Ctrl+Shift+S, the panel's button in the bottom gutter, and `host.close()`, which `StatusPanel` never calls. The first two are DOM events we can see, so they are recorded as closing gestures and every *other* disappearance is treated as a dismissal to undo.
+
+- **Only after the panel has been seen open.** That is what says the user wants it there, and it keeps the keeper silent when `autoOpen` is off and the panel was never opened.
+- **The bottom slot is shared.** The host keeps the terminal and bottom panels mutually exclusive — opening the terminal nulls the bottom panel id, and opening Git Log replaces ours — so reopening over either would stack two panels. The keeper waits, and takes the slot back when it is free.
+- **Bounded retries.** Three consecutive reopens that change nothing and it stops asking until the panel is next seen open, so a host that declines cannot become a loop.
+- **Narrow observers.** A `childList` observer on the main column (not subtree — the bottom panel is a direct child) and a `style` observer on the terminal container, which hides with `display: none` rather than unmounting. Both are needed for the strip to come back within a frame instead of blinking; a 1 s interval is the backstop for a layout that does not match, and retries attaching them until a workspace is open.
+
+The decision is kept clear of the DOM so it can be tested against a fake slot rather than a rendered app — `panelKeeper.test.ts`.
 
 ### Self-update check
 
