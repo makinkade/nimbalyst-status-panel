@@ -32,6 +32,8 @@ function codexStatus(overrides: Partial<Status> = {}): Status {
     session: CODEX_SESSION,
     // The model catalog has no entry for a provider whose CLI is not installed.
     model: null,
+    // Codex turns are not served by a Claude model, so nothing parses.
+    servedModel: null,
     // `resolveEffortLevel` finds nothing on the session and falls back.
     effort: 'high',
     effortSource: 'builtin',
@@ -74,9 +76,9 @@ describe('a session from another provider', () => {
   });
 
   it('shows the raw model id rather than nothing when no label matches', () => {
-    // `friendlyModelName` only knows `claude-code:` variants, so the honest
-    // fallback is the id itself -- never "No session", which would misreport a
-    // session that is plainly there.
+    // `modelLabel` only parses Claude ids, so the honest fallback is the id
+    // itself -- never "No session", which would misreport a session that is
+    // plainly there.
     const html = renderStrip(codexStatus());
     expect(html).toContain('openai-codex:gpt-6-astra');
     expect(html).not.toContain('No session');
@@ -217,5 +219,40 @@ describe('the plan chips beside a Claude session', () => {
     const html = renderUsage(codexStatus({ session: null, planUsage: LOUD_PLAN_USAGE }));
     expect(html).not.toContain('Claude 5h');
     expect(html).toContain('#ef5350');
+  });
+});
+
+describe('the model chip', () => {
+  const OPUS_SESSION: SessionRecord = {
+    id: '406e39d9-085d-4d04-9dda-323b0f69c216',
+    title: 'Status bar disappearing fix',
+    model: 'claude-code:opus-1m',
+    provider: 'claude-code',
+  };
+
+  function renderModel(status: Status): string {
+    return renderToStaticMarkup(<>{buildSegments(status, WORKSPACE).model}</>);
+  }
+
+  it('names the version that actually answered, not the one a table remembers', () => {
+    // The session this was reported from: an `opus-1m` alias, answered by Opus
+    // 5.5, with the chip reading `Opus 5 (1M)`.
+    const html = renderModel(
+      codexStatus({ session: OPUS_SESSION, servedModel: 'claude-opus-5-5' }),
+    );
+    expect(html).toContain('Opus 5.5 (1M)');
+  });
+
+  it('puts both ids in the tooltip, so a wrong label can be checked', () => {
+    const html = renderModel(
+      codexStatus({ session: OPUS_SESSION, servedModel: 'claude-opus-5-5' }),
+    );
+    expect(html).toContain('claude-code:opus-1m, served by claude-opus-5-5');
+  });
+
+  it('says only what it knows before the first reply', () => {
+    const html = renderModel(codexStatus({ session: OPUS_SESSION, servedModel: null }));
+    expect(html).toContain('Opus (1M)');
+    expect(html).not.toContain('served by');
   });
 });

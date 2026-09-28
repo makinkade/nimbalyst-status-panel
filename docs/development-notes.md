@@ -41,6 +41,7 @@ src/
   segments.ts         # segment registry, default order, config reconciliation
   useSegmentConfig.ts # load/save config via host.storage global scope
   lib/ipc.ts          # typed, failure-tolerant wrapper over electronAPI
+  lib/modelNames.ts   # model chip label, parsed from ids -- no version table to maintain
   panelKeeper.ts      # put the panel back when the host dismisses it on a mode switch
   useUpdateCheck.ts   # is there a newer GitHub release? -- cached, throttled, silent
   components/UpdateChip.tsx # the update chip, its confirmation and the manual fallback
@@ -57,7 +58,8 @@ src/
 | Segment | Channel |
 | --- | --- |
 | Session | `sessions:list(workspacePath, opts)` → newest → `sessions:get(id)` |
-| Model / context window | `ai:getModels()` matched on `session.model` |
+| Model | Version from the latest main-thread turn's served model via `transcript:get-tail-messages`, parsed rather than looked up (GET-111); `ai:getModels()` name as fallback |
+| Context window | `ai:getModels()` matched on `session.model` |
 | Effort | `ai:getEffectiveSettings`, falling back to `settings:get-default-effort-level` |
 | Permission mode | `app-settings:get("agentPermissionMode")`, falling back to `workspace:get-state` |
 | Branch / dirty | `git:is-repo`, `git:branches`, `git:get-uncommitted-files` |

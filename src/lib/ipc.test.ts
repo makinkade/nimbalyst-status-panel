@@ -15,8 +15,10 @@ import {
   extractTokenUsage,
   getFocusedSession,
   getGitInfo,
+  getServedModel,
   invoke,
   invokeQuiet,
+  latestServedModel,
   selectedSessionId,
 } from './ipc';
 
@@ -564,5 +566,72 @@ describe('getGitInfo', () => {
       branch: 'master',
       dirtyCount: 2,
     });
+  });
+});
+
+/**
+ * The served model is what puts a version on the model chip, so what counts as
+ * one matters: a subagent's model or Claude Code's placeholder would put the
+ * wrong version there with total confidence.
+ */
+describe('latestServedModel', () => {
+  const turn = (model: unknown, extra: Record<string, unknown> = {}) => ({
+    type: 'assistant_message',
+    model,
+    ...extra,
+  });
+
+  it('takes the newest main-thread assistant turn', () => {
+    expect(latestServedModel([turn('claude-opus-5'), turn('claude-opus-5-5')])).toBe('claude-opus-5-5');
+  });
+
+  it('skips subagent turns', () => {
+    // An Explore agent on Sonnet, inside an Opus session.
+    expect(
+      latestServedModel([turn('claude-opus-5-5'), turn('claude-sonnet-4-5', { subagentId: 'agent-1' })]),
+    ).toBe('claude-opus-5-5');
+  });
+
+  it("skips Claude Code's <synthetic> placeholder turns", () => {
+    expect(latestServedModel([turn('claude-opus-5-5'), turn('<synthetic>')])).toBe('claude-opus-5-5');
+  });
+
+  it('looks past tool calls and user messages to the last assistant turn', () => {
+    expect(
+      latestServedModel([
+        turn('claude-opus-5-5'),
+        { type: 'tool_call', model: 'claude-haiku-4-5' },
+        { type: 'user_message' },
+      ]),
+    ).toBe('claude-opus-5-5');
+  });
+
+  it('returns null when no turn carries a model', () => {
+    expect(latestServedModel([turn(undefined), { type: 'user_message' }])).toBeNull();
+    expect(latestServedModel([])).toBeNull();
+  });
+
+  it('returns null for anything that is not a list', () => {
+    expect(latestServedModel(null)).toBeNull();
+    expect(latestServedModel({ messages: [] })).toBeNull();
+    expect(latestServedModel([null, 'x', 3])).toBeNull();
+  });
+});
+
+describe('getServedModel', () => {
+  it('asks for the transcript tail of the given session', async () => {
+    bridgeInvoke.mockResolvedValue([{ type: 'assistant_message', model: 'claude-opus-5-5' }]);
+
+    await expect(getServedModel('s1')).resolves.toBe('claude-opus-5-5');
+    expect(bridgeInvoke).toHaveBeenCalledWith('transcript:get-tail-messages', 's1', expect.any(Number));
+  });
+
+  it('is quiet when the host has no such channel', async () => {
+    // Undocumented, and polled every five seconds: a missing channel must fall
+    // back to the other labels without a warning per poll.
+    bridgeInvoke.mockRejectedValue(new Error('No handler registered'));
+
+    await expect(getServedModel('s1')).resolves.toBeNull();
+    expect(warn).not.toHaveBeenCalled();
   });
 });

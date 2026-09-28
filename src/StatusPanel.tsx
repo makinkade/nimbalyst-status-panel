@@ -10,8 +10,8 @@ import {
   permissionModeLabel,
   titleCase,
 } from './lib/format';
-import { EffortSource, extractTokenUsage } from './lib/ipc';
-import { friendlyModelName } from './lib/modelNames';
+import { EffortSource, SessionRecord, extractTokenUsage } from './lib/ipc';
+import { modelLabel } from './lib/modelNames';
 import { foreignProvider } from './lib/provider';
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
 import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
@@ -111,9 +111,21 @@ export function StatusPanel({ host }: { host: PanelHost }) {
   );
 }
 
+/**
+ * The model chip's tooltip: the session, the alias it asked for, and -- once a
+ * turn has been answered -- the concrete model that answered it. The label is
+ * derived from those ids, so the ids themselves belong somewhere you can read
+ * them when the label looks wrong.
+ */
+function describeModel(session: SessionRecord, servedModel: string | null): string {
+  const requested = session.model ?? 'unknown model';
+  const served = servedModel && servedModel !== requested ? `, served by ${servedModel}` : '';
+  return `${session.title ?? 'Untitled'} — ${requested}${served}`;
+}
+
 /** Exported for the segment tests, which render the strip without a DOM. */
 export function buildSegments(status: Status, workspacePath: string): Record<SegmentId, ReactNode> {
-  const { session, model, effort, effortSource, permissionMode, git, planUsage, usage } = status;
+  const { session, model, servedModel, effort, effortSource, permissionMode, git, planUsage, usage } = status;
 
   const tokens = extractTokenUsage(session);
   // What currently occupies the window, not what the session has billed.
@@ -136,9 +148,13 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
       <Chip
         icon="smart_toy"
         accent={PALETTE.teal}
-        title={session ? `${session.title ?? 'Untitled'} — ${session.model ?? 'unknown model'}` : undefined}
+        title={session ? describeModel(session, servedModel) : undefined}
       >
-        {model?.name ?? friendlyModelName(session?.model) ?? 'No session'}
+        {modelLabel({
+          sessionModel: session?.model,
+          servedModel,
+          catalogName: model?.name,
+        }) ?? 'No session'}
       </Chip>
     ),
 

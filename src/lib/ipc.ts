@@ -7,6 +7,8 @@
  * between releases should degrade to a missing chip, never a broken panel.
  */
 
+import { parseModelId } from './modelNames';
+
 interface ElectronBridge {
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void;
@@ -370,6 +372,66 @@ export async function getModels(): Promise<ModelInfo[]> {
       .flat() as ModelInfo[];
   }
   return [];
+}
+
+/**
+ * How many transcript entries to look back through for a served model.
+ *
+ * A turn that is all tool calls pushes the latest assistant message back by
+ * one entry per call, so the tail has to be deep enough to reach past a busy
+ * turn. When it is not, the caller keeps the last model it did find -- the
+ * served model does not change mid-turn -- so a miss costs nothing visible.
+ */
+const SERVED_MODEL_TAIL = 40;
+
+/**
+ * The model id the API actually served on the session's latest turn, e.g.
+ * `claude-opus-5-5`, or null when none is on record.
+ *
+ * This is what makes the model chip read `Opus 5.5` without a version table.
+ * The session's own `model` is an alias -- `claude-code:opus-1m` means "the
+ * current Opus" and names no version -- but every assistant turn records the
+ * concrete model that answered it.
+ *
+ * `transcript:get-tail-messages` is how it is reached. `sessions:get` returns
+ * `messages: []` -- messages live in `ai_agent_messages`, which the panel no
+ * longer reads directly (see `getFocusedSession` for why).
+ * The channel instead returns the same projected view the chat itself renders:
+ * the host rebuilds canonical transcript events in memory from the raw message
+ * log on demand, and its Claude Code parser keeps each turn's `message.model`
+ * on the resulting `assistant_message`. It is undocumented, so it is called
+ * quietly, and a host without it just leaves the chip on its fallbacks.
+ */
+export async function getServedModel(sessionId: string): Promise<string | null> {
+  const tail = await invokeQuiet<unknown>('transcript:get-tail-messages', sessionId, SERVED_MODEL_TAIL);
+  return latestServedModel(tail);
+}
+
+/**
+ * Pick the served model out of a transcript tail. Newest last, as the host
+ * returns it.
+ *
+ * Two kinds of assistant message have to be skipped rather than believed:
+ *
+ * - **Subagent turns**, which carry a `subagentId`. An Explore agent on Sonnet
+ *   inside an Opus session says nothing about the session's model, and this
+ *   workspace's own history has `claude-sonnet-4-5` turns in Opus sessions.
+ * - **Anything that does not parse as a Claude model.** Claude Code writes
+ *   `<synthetic>` as the model of placeholder turns it fabricates -- after an
+ *   interrupt, for one -- and those are common enough to be the newest entry.
+ */
+export function latestServedModel(tail: unknown): string | null {
+  if (!Array.isArray(tail)) return null;
+
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const entry = tail[i] as { type?: unknown; subagentId?: unknown; model?: unknown } | null;
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.type !== 'assistant_message') continue;
+    if (entry.subagentId) continue;
+    if (typeof entry.model !== 'string' || !parseModelId(entry.model)?.version) continue;
+    return entry.model;
+  }
+  return null;
 }
 
 /**

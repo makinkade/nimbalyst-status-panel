@@ -11,6 +11,7 @@ import {
   getGitInfo,
   getModels,
   getPermissionMode,
+  getServedModel,
   getUsage,
   getWorkspaceState,
   on,
@@ -22,6 +23,12 @@ import { PlanUsage, fetchPlanUsage } from './lib/planUsage';
 export interface Status {
   session: SessionRecord | null;
   model: ModelInfo | null;
+  /**
+   * The model id the session's latest turn was actually served by, e.g.
+   * `claude-opus-5-5`. `session.model` is an alias that names no version; this
+   * is what does. See `modelLabel`.
+   */
+  servedModel: string | null;
   effort: string | null;
   effortSource: EffortSource | null;
   permissionMode: string | null;
@@ -83,6 +90,7 @@ export function useStatus(workspacePath: string): Status {
   const [status, setStatus] = useState<Status>({
     session: null,
     model: null,
+    servedModel: null,
     effort: null,
     effortSource: null,
     permissionMode: null,
@@ -101,6 +109,12 @@ export function useStatus(workspacePath: string): Status {
   // must not be read as a change.
   const selection = useRef<string | null | undefined>(undefined);
 
+  // The last served model seen for each session. A turn that is all tool calls
+  // can push every assistant message out of the transcript tail we ask for, and
+  // the model does not change mid-turn, so a miss keeps the last answer rather
+  // than blanking the version off the chip.
+  const servedBySession = useRef(new Map<string, string>());
+
   const refresh = useCallback(async () => {
     // Still clear `loading` with no workspace, or the panel renders its
     // placeholder forever and the config chip stays unreachable.
@@ -115,8 +129,11 @@ export function useStatus(workspacePath: string): Status {
     // promise keeps every fetch below in flight together.
     const workspaceState = getWorkspaceState(workspacePath);
 
-    const [session, models, defaultEffort, permissionMode, git, usage] = await Promise.all([
-      workspaceState.then((state) => getFocusedSession(workspacePath, state)),
+    const focused = workspaceState.then((state) => getFocusedSession(workspacePath, state));
+
+    const [session, served, models, defaultEffort, permissionMode, git, usage] = await Promise.all([
+      focused,
+      focused.then((found) => (found ? getServedModel(found.id) : null)),
       getModels(),
       getDefaultEffortLevel(),
       workspaceState.then((state) => getPermissionMode(state)),
@@ -137,10 +154,14 @@ export function useStatus(workspacePath: string): Status {
       ? models.find((entry) => entry.id === session.model) ?? null
       : null;
 
+    if (session && served) servedBySession.current.set(session.id, served);
+    const servedModel = session ? servedBySession.current.get(session.id) ?? null : null;
+
     setStatus((previous) => ({
       ...previous,
       session,
       model,
+      servedModel,
       effort,
       effortSource,
       permissionMode,

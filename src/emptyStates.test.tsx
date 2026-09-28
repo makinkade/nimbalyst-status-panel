@@ -29,6 +29,7 @@ function emptyStatus(overrides: Partial<Status> = {}): Status {
   return {
     session: null,
     model: null,
+    servedModel: null,
     // Effort still resolves with no session -- it is the app-level default the
     // next session would use, and the tooltip says so.
     effort: 'high',
