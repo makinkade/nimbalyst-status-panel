@@ -9,7 +9,8 @@
  * say whose plan they are about (GET-103).
  */
 
-import type { SessionRecord } from './ipc';
+import type { ModelInfo, SessionRecord } from './ipc';
+import type { ProviderIdentity } from './statusModel';
 
 export const CLAUDE_PROVIDER = 'claude-code';
 
@@ -19,31 +20,38 @@ export const CLAUDE_PROVIDER = 'claude-code';
  * `claude-code:opus-1m`, `openai-codex` / `openai-codex:gpt-5.6-luna`), but a
  * list entry that never resolved through `sessions:get` may have only the model.
  */
-export function sessionProvider(session: SessionRecord | null): string | null {
-  if (!session) return null;
+export function providerIdentity(session: SessionRecord | null, models: ModelInfo[] = []): ProviderIdentity {
+  if (!session) return { id: null, source: 'unknown' };
 
-  if (typeof session.provider === 'string' && session.provider) return session.provider;
+  if (typeof session.provider === 'string' && session.provider.trim()) {
+    return { id: session.provider.trim(), source: 'session' };
+  }
+  const catalog = models.filter((entry) => entry.id === session.model && entry.provider);
+  const providers = new Set(catalog.map((entry) => entry.provider));
+  if (providers.size === 1) return { id: catalog[0].provider, source: 'catalog' };
 
   const model = session.model;
   if (typeof model === 'string' && model.includes(':')) {
     const prefix = model.slice(0, model.indexOf(':'));
-    if (prefix) return prefix;
+    if (prefix) return { id: prefix, source: 'prefix' };
   }
 
-  return null;
+  return { id: null, source: 'unknown' };
+}
+
+export function sessionProvider(session: SessionRecord | null): string | null {
+  return providerIdentity(session).id;
 }
 
 /**
  * The provider to disclaim the Claude plan chips against, or null when there is
  * nothing to disclaim.
  *
- * Only a *positive* non-Claude signal degrades the chips. No session at all, or
- * a session whose provider cannot be determined, leaves them as they were: with
- * no competing model on screen the bars are simply your plan, and demoting them
- * on a missing field would mute the common case on a technicality.
+ * GET-223: an unknown session is not a Claude session. Keep the old no-session
+ * plan view, but qualify/mute it when a selected session's owner is unknown.
  */
 export function foreignProvider(session: SessionRecord | null): string | null {
   const provider = sessionProvider(session);
-  if (provider === null || provider === CLAUDE_PROVIDER) return null;
-  return provider;
+  if (!session || provider === CLAUDE_PROVIDER) return null;
+  return provider ?? 'unknown provider';
 }

@@ -32,10 +32,9 @@ describe('foreignProvider', () => {
   });
 
   it('is null when there is nothing to disclaim against', () => {
-    // No session, or a session whose provider cannot be determined: the bars
-    // are simply your plan, and muting them on a missing field would demote
-    // the ordinary case on a technicality.
+    // No session leaves the separate Claude plan view intact. An unknown
+    // selected session must not be treated as a Claude session (GET-223).
     expect(foreignProvider(null)).toBeNull();
-    expect(foreignProvider({ id: 'a' } as SessionRecord)).toBeNull();
+    expect(foreignProvider({ id: 'a' } as SessionRecord)).toBe('unknown provider');
   });
 });

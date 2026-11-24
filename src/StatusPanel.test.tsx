@@ -4,6 +4,7 @@ import { buildSegments } from './StatusPanel';
 import { SEGMENT_IDS } from './segments';
 import type { SessionRecord } from './lib/ipc';
 import type { Status } from './useStatus';
+import { statusFixture, type StatusInputs } from './test/statusFixture';
 
 /**
  * GET-89: v1 is Claude Code only, so a session from another provider is
@@ -27,8 +28,8 @@ const CODEX_SESSION: SessionRecord = {
 
 const WORKSPACE = String.raw`C:\Users\Mark Kinkade\source\repos\nimbalyst-status-panel`;
 
-function codexStatus(overrides: Partial<Status> = {}): Status {
-  return {
+function codexStatus(overrides: Partial<StatusInputs> = {}): Status {
+  return statusFixture({
     session: CODEX_SESSION,
     // The model catalog has no entry for a provider whose CLI is not installed.
     model: null,
@@ -43,7 +44,7 @@ function codexStatus(overrides: Partial<Status> = {}): Status {
     usage: null,
     loading: false,
     ...overrides,
-  };
+  }, WORKSPACE);
 }
 
 /** Plan-usage readings high enough that the colour is a loud claim. */
@@ -87,7 +88,7 @@ describe('a session from another provider', () => {
   it('degrades the context bar to a placeholder that says why', () => {
     const html = renderStrip(codexStatus());
     expect(html).toContain('Context —');
-    expect(html).toContain('no tokenUsage in metadata');
+    expect(html).toContain('Token usage is not reported for this session');
   });
 
   it('still renders the provider-neutral segments', () => {
@@ -118,6 +119,14 @@ describe('a session from another provider', () => {
         }),
       ),
     ).not.toThrow();
+  });
+
+  it('uses a model placeholder for a bare selected session and mutes unknown-provider Claude usage', () => {
+    const html = renderStrip(codexStatus({ session: { id: 'bare' }, planUsage: LOUD_PLAN_USAGE }));
+    expect(html).toContain('Model —');
+    expect(html).toContain('Claude 5h');
+    expect(html).toContain('unknown provider');
+    expect(html).not.toContain('No session');
   });
 });
 

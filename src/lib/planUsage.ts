@@ -49,6 +49,13 @@ export interface PlanUsage {
   allLimits?: RawLimit[];
 }
 
+export type PlanFailure = 'credentials-unavailable' | 'unauthenticated' | 'rate-limited' |
+  'unavailable' | 'invalid-payload' | 'cancelled';
+export interface PlanResult {
+  usage: PlanUsage | null;
+  failure: PlanFailure | null;
+}
+
 // ── The usage endpoint ──────────────────────────────────────────────────────
 
 interface UsageWindowResponse {
@@ -94,29 +101,56 @@ const CACHE_TTL_MS = 60_000;
  *  - a floor between calls; inside it the previous answer is returned
  */
 const MIN_INTERVAL_MS = 30_000;
-let inFlight: Promise<PlanUsage | null> | null = null;
+let inFlight: Promise<PlanResult> | null = null;
 let lastFinishedAt = 0;
-let lastResult: PlanUsage | null = null;
+let lastResult: PlanResult = { usage: null, failure: null };
+let authGeneration = 0;
+let ignoreSharedCache = false;
+let requestController: AbortController | null = null;
+
+/**
+ * GET-223: the shared file has no owner. After a detected login change it must
+ * not be rebound to the new account, even when younger than 60 seconds. Leave
+ * its on-disk contract alone; ignore it until this process gets a new reading.
+ */
+export function invalidatePlanUsage(): void {
+  authGeneration += 1;
+  requestController?.abort();
+  inFlight = null;
+  lastFinishedAt = 0;
+  lastResult = { usage: null, failure: null };
+  ignoreSharedCache = true;
+}
 
 export async function fetchPlanUsage(): Promise<PlanUsage | null> {
+  return (await fetchPlanUsageResult()).usage;
+}
+
+export async function fetchPlanUsageResult(): Promise<PlanResult> {
   if (inFlight) return inFlight;
   if (Date.now() - lastFinishedAt < MIN_INTERVAL_MS) return lastResult;
 
-  inFlight = runPlanUsage()
+  const generation = authGeneration;
+  const work = runPlanUsage(generation)
     // A throw would reject every caller sharing this promise, and the panel
     // polls with `void`, so it would land as an unhandled rejection rather than
     // a chip. "Stale is better than nothing" has to cover bugs as well as
     // outages: fall back to the last reading and let it render as stale.
-    .catch((error) => {
-      console.debug('[status-panel] plan usage failed:', error);
-      return lastResult;
+    .catch(() => {
+      // Never log bridge/fetch objects: they can contain request credentials.
+      return { usage: lastResult.usage, failure: 'unavailable' as const };
     })
     .finally(() => {
-      inFlight = null;
-      lastFinishedAt = Date.now();
+      if (generation === authGeneration) {
+        inFlight = null;
+        lastFinishedAt = Date.now();
+      }
     });
 
-  lastResult = await inFlight;
+  inFlight = work;
+  const result = await work;
+  if (generation !== authGeneration) return { usage: null, failure: 'cancelled' };
+  lastResult = result;
   return lastResult;
 }
 
@@ -127,22 +161,27 @@ export async function fetchPlanUsage(): Promise<PlanUsage | null> {
  * fallback keeps the cached `timestamp`, so a reading that stops advancing
  * renders as stale rather than passing for current.
  */
-async function runPlanUsage(): Promise<PlanUsage | null> {
-  const cached = await readCache();
-  if (cached && Date.now() - readingTime(cached) < CACHE_TTL_MS) return cached;
+async function runPlanUsage(generation: number): Promise<PlanResult> {
+  const cached = ignoreSharedCache ? null : await readCache();
+  if (cached && Date.now() - readingTime(cached) >= 0 &&
+    Date.now() - readingTime(cached) < CACHE_TTL_MS) return { usage: cached, failure: null };
 
   const token = await readAccessToken();
-  if (!token) return cached;
+  if (!token) return { usage: cached, failure: 'credentials-unavailable' };
+  if (generation !== authGeneration) return { usage: null, failure: 'cancelled' };
 
-  const usage = await requestUsage(token);
-  if (!usage) return cached;
+  const result = await requestUsage(token);
+  if (generation !== authGeneration) return { usage: null, failure: 'cancelled' };
+  if (!result.usage) return { usage: cached, failure: result.failure };
 
-  await writeCache(usage);
-  return usage;
+  await writeCache(result.usage, generation);
+  if (generation === authGeneration) ignoreSharedCache = false;
+  return result;
 }
 
-async function requestUsage(token: string): Promise<PlanUsage | null> {
+async function requestUsage(token: string): Promise<PlanResult> {
   const controller = new AbortController();
+  requestController = controller;
   const timer = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
@@ -162,17 +201,43 @@ async function requestUsage(token: string): Promise<PlanUsage | null> {
       // warning: the caller falls back to the cached reading, and the older
       // timestamp it carries is what makes the chips render as stale.
       console.debug(`[status-panel] usage API returned ${response.status}`);
-      return null;
+      return { usage: null, failure: response.status === 401 ? 'unauthenticated'
+        : response.status === 429 ? 'rate-limited' : 'unavailable' };
     }
 
-    return shapeUsage((await response.json()) as UsageResponse);
+    const body = await response.json();
+    if (!validUsageResponse(body)) {
+      return { usage: null, failure: 'invalid-payload' };
+    }
+    return { usage: shapeUsage(body as UsageResponse), failure: null };
   } catch (error) {
     // Offline, DNS, timeout. Degrade quietly to the cached reading.
-    console.debug('[status-panel] usage fetch failed:', error);
-    return null;
+    return { usage: null, failure: 'unavailable' };
   } finally {
     window.clearTimeout(timer);
+    if (requestController === controller) requestController = null;
   }
+}
+
+function percentage(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/** Schema drift is unavailable data, not a fresh set of zero/missing limits. */
+function validUsageResponse(value: unknown): value is UsageResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (!['five_hour', 'seven_day', 'limits'].some((key) => key in record)) return false;
+  for (const key of ['five_hour', 'seven_day']) {
+    const window = record[key];
+    if (window == null) continue;
+    if (typeof window !== 'object' || Array.isArray(window)) return false;
+    const utilization = (window as Record<string, unknown>).utilization;
+    if (utilization != null && !percentage(utilization)) return false;
+  }
+  if (record.limits != null && !Array.isArray(record.limits)) return false;
+  return (toArray<Record<string, unknown>>(record.limits)).every((limit) =>
+    !!limit && typeof limit === 'object' && (limit.percent == null || percentage(limit.percent)));
 }
 
 function shapeUsage(response: UsageResponse): PlanUsage {
@@ -180,9 +245,9 @@ function shapeUsage(response: UsageResponse): PlanUsage {
 
   return {
     timestamp: localTimestamp(new Date()),
-    fiveHour: response.five_hour?.utilization ?? null,
+    fiveHour: percentage(response.five_hour?.utilization) ? response.five_hour.utilization : null,
     fiveHourReset: response.five_hour?.resets_at ?? null,
-    sevenDay: response.seven_day?.utilization ?? null,
+    sevenDay: percentage(response.seven_day?.utilization) ? response.seven_day.utilization : null,
     sevenDayReset: response.seven_day?.resets_at ?? null,
     scoped: scopedLimits(limits),
     allLimits: limits.map((limit) => ({
@@ -203,10 +268,10 @@ function scopedLimits(limits: LimitResponse[]): ScopedLimit[] {
 
   for (const limit of limits) {
     const model = limit.scope?.model?.display_name;
-    if (!model) continue;
+    if (!model || !percentage(limit.percent)) continue;
     scoped.push({
       label: `${windowLabel(limit.group)} ${model}`,
-      pct: limit.percent ?? 0,
+      pct: limit.percent,
       reset: limit.resets_at ?? null,
     });
   }
@@ -278,8 +343,19 @@ async function readCache(): Promise<PlanUsage | null> {
 
   return {
     ...usage,
-    scoped: toArray<ScopedLimit>(usage.scoped),
-    allLimits: toArray<RawLimit>(usage.allLimits),
+    fiveHour: percentage(usage.fiveHour) ? usage.fiveHour : null,
+    sevenDay: percentage(usage.sevenDay) ? usage.sevenDay : null,
+    scoped: toArray<ScopedLimit>(usage.scoped).filter((limit) =>
+      limit && typeof limit.label === 'string' && percentage(limit.pct)).map((limit) => ({
+      label: limit.label, pct: limit.pct, reset: typeof limit.reset === 'string' ? limit.reset : null,
+    })),
+    allLimits: toArray<RawLimit>(usage.allLimits).filter((limit) =>
+      limit && typeof limit === 'object').map((limit) => ({
+      group: typeof limit.group === 'string' ? limit.group : null,
+      model: typeof limit.model === 'string' ? limit.model : null,
+      percent: percentage(limit.percent) ? limit.percent : null,
+      resets: typeof limit.resets === 'string' ? limit.resets : null,
+    })),
   };
 }
 
@@ -303,7 +379,8 @@ const WRITER_ID = Math.random().toString(36).slice(2, 10);
  * the app only acts on for paths that are open editor tabs, so a temp file in
  * the Claude config directory is inert.
  */
-async function writeCache(usage: PlanUsage): Promise<void> {
+async function writeCache(usage: PlanUsage, generation: number): Promise<void> {
+  if (generation !== authGeneration) return;
   const suffix = `.${WRITER_ID}.tmp`;
   const written = await invokeQuiet<GlobalFileResult>(
     'write-global-claude-file',
@@ -315,7 +392,7 @@ async function writeCache(usage: PlanUsage): Promise<void> {
   // directory; the cache sits beside it, so strip the suffix rather than
   // guessing a path separator.
   const tempPath = written?.success ? written.filePath : undefined;
-  if (!tempPath || !tempPath.endsWith(suffix)) return;
+  if (!tempPath || !tempPath.endsWith(suffix) || generation !== authGeneration) return;
 
   await invokeQuiet('move-file', tempPath, tempPath.slice(0, -suffix.length));
 }

@@ -13,8 +13,8 @@ Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the f
 | Chip | Content |
 | --- | --- |
 | Model | Display name of the session's model |
-| Effort | Reasoning effort, e.g. `High` |
-| Permission mode | `Bypass` / `Auto` / `Plan` / `Default`, color-coded |
+| Effort | Configured reasoning effort, e.g. `High`, or a placeholder when it is not reported |
+| Permission mode | Workspace policy: `Bypass` / `Auto` / `Plan` / `Default`; not the session sandbox |
 | Directory | Repo root folder name when in a git repo, else the workspace folder |
 | Branch | Current branch, with `±n` uncommitted-file count |
 | Context | Usage bar, percentage, and `↑input ↓output` token counts |
@@ -41,9 +41,9 @@ The version you are running is named at the foot of that same popover, and when 
 
 ## Claude Code support
 
-This version is built for Claude Code sessions. The provider-neutral chips — effort, permission mode, directory, branch and context — work with any session, but plan limits are read from your Anthropic plan, and model names are resolved from Claude Code model ids.
+The plan chips still report Claude usage only. Model names use the host catalog or a readable ID fallback, with Claude's served-model version preserved. Directory, branch and workspace policy work independently of provider support. Effort and context use reported data and audited capabilities; a missing or unsupported reading stays a placeholder instead of becoming a guessed effort or zero usage.
 
-Beside a session from another provider (Copilot, Cursor, Codex) the plan chips say so rather than implying the number describes that session: they relabel to `Claude 5h` / `Claude 7d`, render muted instead of green/yellow/red, and name the session's actual provider in their tooltip. No other provider's quota is reported.
+Beside a session from another provider (Copilot, Cursor, Codex), or a session with an unknown provider, the plan chips relabel to `Claude 5h` / `Claude 7d` and render muted. Their tooltips name the provider and explain that the reading comes from the Claude login/config source; association with the selected session's account is unverified. No other provider's quota is reported. Switching sessions clears the old session's readings while the new selection resolves. Existing segment order and visibility preferences are preserved.
 
 ## Install
 

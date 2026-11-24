@@ -10,9 +10,9 @@ import {
   permissionModeLabel,
   titleCase,
 } from './lib/format';
-import { EffortSource, SessionRecord, extractTokenUsage } from './lib/ipc';
+import type { EffortSource } from './lib/ipc';
 import { modelLabel } from './lib/modelNames';
-import { foreignProvider } from './lib/provider';
+import { fixedClaudeUsage, type UsageBar } from './lib/statusPresentation';
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
 import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
 import { SegmentId } from './segments';
@@ -27,28 +27,6 @@ interface PanelHost {
   storage?: PanelStorage;
 }
 
-/**
- * The cache holds for 60s and the panel refreshes every 60s, so a reading older
- * than this means the fetch itself is failing -- almost always because the
- * usage API is rate-limiting, which it does exactly when you are near a cap.
- */
-const USAGE_STALE_AFTER_MS = 5 * 60_000;
-
-interface UsageBar {
-  key: string;
-  icon: string;
-  label: string;
-  percent: number;
-  reset: string | null;
-  /** Age of the reading, when it is old enough to be worth saying so. */
-  staleSince?: string | null;
-  /**
-   * The non-Claude provider of the session on screen, when there is one. The
-   * bar is about your Claude plan either way; this is what makes it say so.
-   */
-  foreign?: string | null;
-}
-
 export function StatusPanel({ host }: { host: PanelHost }) {
   const workspacePath = host.getPrimaryFolderPath?.() ?? host.workspacePath;
   const status = useStatus(workspacePath);
@@ -57,7 +35,7 @@ export function StatusPanel({ host }: { host: PanelHost }) {
 
   // Name the scoped-caps row after the caps actually in force, so the config
   // list says "Model caps (7d Fable)" rather than something abstract.
-  const scopedLabels = (status.planUsage?.scoped ?? []).map((entry) => entry.label);
+  const scopedLabels = fixedClaudeUsage(status.readings).scoped.map((entry) => entry.label);
   const labels = {
     ...SEGMENT_LABELS,
     usageScoped: scopedLabels.length
@@ -78,12 +56,6 @@ export function StatusPanel({ host }: { host: PanelHost }) {
         config.order
           .filter((id) => !hidden.has(id))
           .map((id) => <Fragment key={id}>{segments[id]}</Fragment>)
-      )}
-
-      {!status.planUsage && status.usage?.error && (
-        <Chip icon="error" accent={PALETTE.red} title={status.usage.error}>
-          Usage unavailable
-        </Chip>
       )}
 
       {/*
@@ -117,57 +89,62 @@ export function StatusPanel({ host }: { host: PanelHost }) {
  * derived from those ids, so the ids themselves belong somewhere you can read
  * them when the label looks wrong.
  */
-function describeModel(session: SessionRecord, servedModel: string | null): string {
-  const requested = session.model ?? 'unknown model';
+function describeModel(status: Status): string {
+  const { session, model, servedModel: reading } = status.readings;
+  const requested = model.value?.requestedId ?? 'unknown model';
+  const servedModel = reading.value;
   const served = servedModel && servedModel !== requested ? `, served by ${servedModel}` : '';
-  return `${session.title ?? 'Untitled'} — ${requested}${served}`;
+  return `${session?.title ?? 'Untitled'} — ${requested}${served}${reading.reason ? `. ${reading.reason}` : ''}`;
 }
 
 /** Exported for the segment tests, which render the strip without a DOM. */
 export function buildSegments(status: Status, workspacePath: string): Record<SegmentId, ReactNode> {
-  const { session, model, servedModel, effort, effortSource, permissionMode, git, planUsage, usage } = status;
-
-  const tokens = extractTokenUsage(session);
+  const { readings, git } = status;
+  const { session, model } = readings;
+  const servedModel = readings.servedModel.value;
+  const effort = readings.effort.value?.level;
+  const effortSource = readings.effort.value?.source ?? null;
+  const permissionMode = readings.workspacePolicy.value?.mode;
+  const tokens = readings.tokens.value;
   // What currently occupies the window, not what the session has billed.
-  const contextTokens = tokens?.currentContext?.tokens;
-  const contextWindow =
-    tokens?.currentContext?.contextWindow ?? tokens?.contextWindow ?? model?.contextWindow;
-  const contextPercent =
-    contextTokens && contextWindow ? Math.min((contextTokens / contextWindow) * 100, 100) : null;
+  const contextTokens = readings.context.value?.tokens;
+  const contextWindow = readings.context.value?.window ?? undefined;
+  const contextPercent = readings.context.value?.percent ?? null;
+  const contextAccent = readings.context.state === 'stale' ? MUTED : contextColor(contextPercent ?? 0);
 
   // Repo root name when in a git repo, else the folder name -- as in the status line.
   const displayPath = folderName(git.repoPath ?? workspacePath);
 
   // The plan chips report your Claude plan whatever the session is, so beside a
   // session from another provider they have to say whose plan they mean.
-  const foreign = foreignProvider(session);
-  const bars = buildUsageBars(planUsage, usage, foreign);
+  const bars = fixedClaudeUsage(readings);
+  const foreign = bars.foreign;
 
   return {
     model: (
       <Chip
         icon="smart_toy"
-        accent={PALETTE.teal}
-        title={session ? describeModel(session, servedModel) : undefined}
+        accent={model.state === 'stale' || readings.servedModel.state === 'stale' ? MUTED : PALETTE.teal}
+        title={session ? describeModel(status) : undefined}
       >
         {modelLabel({
-          sessionModel: session?.model,
+          sessionModel: model.value?.requestedId,
           servedModel,
-          catalogName: model?.name,
-        }) ?? 'No session'}
+          catalogName: model.value?.displayName,
+        }) ?? (session ? 'Model —' : 'No session')}
       </Chip>
     ),
 
     effort: effort ? (
-      <Chip icon="bolt" accent={PALETTE.green} title={describeEffort(effort, effortSource)}>
+      <Chip icon="bolt" accent={readings.effort.state === 'stale' ? MUTED : PALETTE.green} title={describeEffort(effort, effortSource)}>
         {titleCase(effort)}
       </Chip>
-    ) : null,
+    ) : <Chip icon="bolt" accent={MUTED} title={readings.effort.reason ?? undefined}>Effort —</Chip>,
 
     permissionMode: permissionMode ? (
       <Chip
         icon="shield"
-        accent={permissionModeColor(permissionModeLabel(permissionMode))}
+        accent={readings.workspacePolicy.state === 'stale' ? MUTED : permissionModeColor(permissionModeLabel(permissionMode))}
         title={`Workspace permission mode: ${permissionMode}`}
       >
         {permissionModeLabel(permissionMode)}
@@ -178,7 +155,7 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
       <Chip
         icon="shield"
         accent={MUTED}
-        title="workspace:get-state returned no agentPermissions.permissionMode"
+        title={readings.workspacePolicy.reason ?? undefined}
       >
         <span className="sp-label">Mode —</span>
       </Chip>
@@ -223,11 +200,11 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
       contextPercent !== null ? (
         <Chip
           icon="database"
-          accent={contextColor(contextPercent)}
+          accent={contextAccent}
           title={`${formatTokens(contextTokens)} of ${formatTokens(contextWindow)} tokens in context`}
         >
           <span className="sp-label">Context</span>
-          <Bar percent={contextPercent} color={contextColor(contextPercent)} />
+          <Bar percent={contextPercent} color={contextAccent} />
           <span className="sp-value">{Math.round(contextPercent)}%</span>
           {(tokens?.inputTokens !== undefined || tokens?.outputTokens !== undefined) && (
             <span className="sp-tokens">
@@ -236,7 +213,7 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
           )}
         </Chip>
       ) : (
-        <Chip icon="database" accent={MUTED} title={describeMissingContext(status, tokens, contextWindow)}>
+        <Chip icon="database" accent={MUTED} title={readings.context.reason ?? 'No context window known'}>
           <span className="sp-label">Context —</span>
         </Chip>
       ),
@@ -244,12 +221,12 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
     usage5h: bars.fiveHour ? (
       <UsageChip bar={bars.fiveHour} />
     ) : (
-      <MissingBar label="5h" icon="schedule" planUsage={planUsage} usage={usage} />
+      <MissingBar label="5h" icon="schedule" reason={bars.hasReading ? 'The last plan-usage reading carried no 5h window.' : bars.reason} />
     ),
     usage7d: bars.sevenDay ? (
       <UsageChip bar={bars.sevenDay} />
     ) : (
-      <MissingBar label="7d" icon="calendar_month" planUsage={planUsage} usage={usage} />
+      <MissingBar label="7d" icon="calendar_month" reason={bars.hasReading ? 'The last plan-usage reading carried no 7d window.' : bars.reason} />
     ),
     usageScoped: bars.scoped.length ? (
       bars.scoped.map((bar) => <UsageChip key={bar.key} bar={bar} />)
@@ -261,14 +238,14 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
         icon="speed"
         accent={MUTED}
         title={
-          planUsage
+          bars.hasReading && !bars.hasUnmeasuredScopedLimit
             ? `No model-scoped caps on your Claude plan right now${
                 foreign ? ` (this is a ${foreign} session; the caps are not about it)` : ''
               }`
-            : 'Usage endpoint unreachable; claude-usage:get does not expose scoped caps'
+            : bars.hasUnmeasuredScopedLimit ? 'A model-scoped limit was reported without a usable reading' : bars.reason
         }
       >
-        <span className="sp-label">{planUsage ? 'No scoped caps' : 'Scoped —'}</span>
+        <span className="sp-label">{bars.hasReading && !bars.hasUnmeasuredScopedLimit ? 'No scoped caps' : 'Scoped —'}</span>
       </Chip>
     ),
   };
@@ -282,159 +259,20 @@ function describeEffort(effort: string, source: EffortSource | null): string {
       : source === 'app-default'
         ? 'the app default effort level'
         : 'the built-in default (no session or app value set)';
-  return `Reasoning effort: ${titleCase(effort)}, from ${origin}.`;
-}
-
-/** Says which link in the chain is missing, so the tooltip is a diagnosis. */
-function describeMissingContext(
-  status: Status,
-  tokens: ReturnType<typeof extractTokenUsage>,
-  contextWindow: number | undefined,
-): string {
-  if (!status.session) return 'No session resolved for this workspace';
-  if (!tokens) return `Session ${status.session.id}: no tokenUsage in metadata`;
-  if (tokens.currentContext?.tokens === undefined) {
-    return `Session ${status.session.id}: tokenUsage has no currentContext.tokens`;
-  }
-  if (!contextWindow) return `Session ${status.session.id}: no context window known`;
-  return 'Context unavailable';
+  return `Configured reasoning effort: ${titleCase(effort)}, from ${origin}.`;
 }
 
 /**
- * A usage window with no reading behind it.
- *
- * These two segments used to render `null`, so a segment the user had switched
- * *on* simply was not there -- indistinguishable from one hidden in the config
- * popover, and the only segments to behave that way: mode, branch, context and
- * scoped caps all degrade to a muted placeholder that says why. This gives 5h
- * and 7d the same one.
+ * GET-97: keep configured usage segments visible when no reading is available.
+ * A vanished chip looks like one hidden in the config popover; a placeholder
+ * explains that it is enabled but its reading is missing.
  */
-function MissingBar({
-  label,
-  icon,
-  planUsage,
-  usage,
-}: {
-  label: string;
-  icon: string;
-  planUsage: Status['planUsage'];
-  usage: Status['usage'];
-}) {
+function MissingBar({ label, icon, reason }: { label: string; icon: string; reason: string }) {
   return (
-    <Chip icon={icon} accent={MUTED} title={describeMissingUsage(label, planUsage, usage)}>
+    <Chip icon={icon} accent={MUTED} title={reason}>
       <span className="sp-label">{label} —</span>
     </Chip>
   );
-}
-
-/** Which link in the usage chain is missing, so the tooltip is a diagnosis. */
-function describeMissingUsage(
-  label: string,
-  planUsage: Status['planUsage'],
-  usage: Status['usage'],
-): string {
-  if (planUsage) return `The last plan-usage reading carried no ${label} window.`;
-  if (usage?.error) return `Usage unavailable: ${usage.error}`;
-  if (usage) return `claude-usage:get returned no ${label} window.`;
-  return (
-    `No ${label} reading: the Anthropic usage endpoint is unreachable and claude-usage:get ` +
-    'returned nothing either. Reading your plan directly needs the Claude credentials file, ' +
-    "so this is also what it looks like when the extension's filesystem permission is denied."
-  );
-}
-
-/**
- * The usage endpoint is authoritative when it answers: it carries the scoped
- * model caps (e.g. `7d Fable`) that `claude-usage:get` drops.
- *
- * `foreign` rides along on every bar rather than being applied here: the
- * numbers are the same numbers whoever is on screen, and it is only their
- * presentation -- label and colour -- that has to change.
- */
-function buildUsageBars(
-  planUsage: Status['planUsage'],
-  usage: Status['usage'],
-  foreign: string | null = null,
-): { fiveHour: UsageBar | null; sevenDay: UsageBar | null; scoped: UsageBar[] } {
-  if (planUsage) {
-    const readAt = planUsage.timestamp ? Date.parse(planUsage.timestamp) : NaN;
-    const staleSince =
-      Number.isFinite(readAt) && Date.now() - readAt > USAGE_STALE_AFTER_MS
-        ? planUsage.timestamp ?? null
-        : null;
-
-    return {
-      fiveHour:
-        typeof planUsage.fiveHour === 'number'
-          ? {
-              key: '5h',
-              icon: 'schedule',
-              label: '5h',
-              percent: planUsage.fiveHour,
-              reset: planUsage.fiveHourReset ?? null,
-              staleSince,
-              foreign,
-            }
-          : null,
-      sevenDay:
-        typeof planUsage.sevenDay === 'number'
-          ? {
-              key: '7d',
-              icon: 'calendar_month',
-              label: '7d',
-              percent: planUsage.sevenDay,
-              reset: planUsage.sevenDayReset ?? null,
-              staleSince,
-              foreign,
-            }
-          : null,
-      scoped: (planUsage.scoped ?? []).map((scoped) => ({
-        key: scoped.label,
-        icon: scoped.label.startsWith('5h') ? 'schedule' : 'calendar_month',
-        label: scoped.label,
-        percent: scoped.pct,
-        reset: scoped.reset,
-        staleSince,
-        foreign,
-      })),
-    };
-  }
-
-  return {
-    fiveHour: usage?.fiveHour
-      ? {
-          key: '5h',
-          icon: 'schedule',
-          label: '5h',
-          percent: usage.fiveHour.utilization,
-          reset: usage.fiveHour.resetsAt,
-          foreign,
-        }
-      : null,
-    sevenDay: usage?.sevenDay
-      ? {
-          key: '7d',
-          icon: 'calendar_month',
-          label: '7d',
-          percent: usage.sevenDay.utilization,
-          reset: usage.sevenDay.resetsAt,
-          foreign,
-        }
-      : null,
-    // seven_day_opus is the host's only scoped window.
-    scoped: usage?.sevenDayOpus
-      ? [
-          {
-            key: '7d-opus',
-            icon: 'calendar_month',
-            label: '7d Opus',
-            percent: usage.sevenDayOpus.utilization,
-            reset: usage.sevenDayOpus.resetsAt,
-            foreign,
-          },
-        ]
-      : [],
-  };
 }
 
 /**
@@ -449,7 +287,7 @@ function usageBarLabel(bar: UsageBar): string {
 }
 
 function UsageChip({ bar }: { bar: UsageBar }) {
-  const stale = !!bar.staleSince;
+  const stale = bar.stale;
   const label = usageBarLabel(bar);
 
   // A reading the panel cannot vouch for loses its red/green authority: the
@@ -465,11 +303,11 @@ function UsageChip({ bar }: { bar: UsageBar }) {
     ? `${label} at ${Math.round(bar.percent)}% — resets ${reset}${countdown ? ` (in ${countdown})` : ''}`
     : `${label} at ${Math.round(bar.percent)}%`;
 
-  const notes = [live];
+  const notes = [live, 'Usage comes from your Claude sign-in. It has not been linked to the selected session’s account.'];
 
   if (stale) {
     notes.push(
-      `STALE — last reading that actually came back: ${formatResetTime(bar.staleSince)}. ` +
+      `STALE — last reading that actually came back: ${formatResetTime(bar.staleSince) || 'unknown observation time'}. ` +
         'The usage API rate-limits too, and it does so precisely when you are near a cap, ' +
         'so this is the last value received rather than your current usage.',
     );

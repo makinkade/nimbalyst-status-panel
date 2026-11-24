@@ -21,17 +21,18 @@ import { describe, expect, it } from 'vitest';
 import { buildSegments } from './StatusPanel';
 import { SEGMENT_IDS, type SegmentId } from './segments';
 import type { Status } from './useStatus';
+import { statusFixture, type StatusInputs } from './test/statusFixture';
 
 const WORKSPACE = String.raw`C:\Users\Mark Kinkade\source\repos\nimbalyst-status-panel`;
 
 /** Nothing resolved at all: no session, not a git repo, no usage of any kind. */
-function emptyStatus(overrides: Partial<Status> = {}): Status {
-  return {
+function emptyStatus(overrides: Partial<StatusInputs> = {}): Status {
+  return statusFixture({
     session: null,
     model: null,
     servedModel: null,
-    // Effort still resolves with no session -- it is the app-level default the
-    // next session would use, and the tooltip says so.
+    // GET-223 keeps an honest effort placeholder with no selected session.
+    // Defaults only apply after a supported provider/session is known.
     effort: 'high',
     effortSource: 'builtin',
     permissionMode: null,
@@ -40,7 +41,7 @@ function emptyStatus(overrides: Partial<Status> = {}): Status {
     usage: null,
     loading: false,
     ...overrides,
-  };
+  }, WORKSPACE);
 }
 
 function render(id: SegmentId, status: Status, workspacePath = WORKSPACE): string {
@@ -75,7 +76,7 @@ describe('the strip with nothing behind it', () => {
   it('names the missing workspace state in the permission-mode placeholder', () => {
     const html = render('permissionMode', emptyStatus());
     expect(html).toContain('Mode —');
-    expect(html).toContain('agentPermissions.permissionMode');
+    expect(html).toContain('Workspace permission policy is unavailable');
   });
 
   it('says which link is missing in the context placeholder', () => {
@@ -111,12 +112,12 @@ describe('the usage windows with no reading behind them', () => {
     // A denied `permissions.filesystem` means no credentials file, so no token,
     // so no plan reading -- and the tooltip is the only place that can say so.
     const html = render('usage5h', emptyStatus());
-    expect(html).toContain('filesystem permission is denied');
+    expect(html).toContain('filesystem permission may be unavailable');
   });
 
-  it('reports the host channel error when that is what came back', () => {
+  it('reports unavailable host usage without rendering raw host errors', () => {
     const html = render('usage5h', emptyStatus({ usage: { error: 'not logged in' } }));
-    expect(html).toContain('Usage unavailable: not logged in');
+    expect(html).toContain('Claude usage is unavailable from the host');
   });
 
   it('distinguishes a reading that simply lacks the window', () => {

@@ -399,3 +399,64 @@ describe('staleness', () => {
     expect(second).toEqual(first);
   });
 });
+
+describe('auth boundaries and explicit failures (GET-223)', () => {
+  it('ignores a young unowned shared file after auth changes', async () => {
+    seedCredentials();
+    seedCache({ fiveHour: 12 });
+    respondOk(usagePayload(70));
+    const { fetchPlanUsageResult, invalidatePlanUsage } = await loadClient();
+    invalidatePlanUsage();
+    expect((await fetchPlanUsageResult()).usage?.fiveHour).toBe(70);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a late previous-auth response without overwriting the new result or shared file', async () => {
+    seedCredentials();
+    let finishOld!: (value: unknown) => void;
+    mockFetch.mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve; }));
+    const { fetchPlanUsageResult, invalidatePlanUsage } = await loadClient();
+    const old = fetchPlanUsageResult();
+    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    const oldSignal = mockFetch.mock.calls[0][1].signal as AbortSignal;
+    invalidatePlanUsage();
+    expect(oldSignal.aborted).toBe(true);
+    respondOk(usagePayload(80));
+    expect((await fetchPlanUsageResult()).usage?.fiveHour).toBe(80);
+    finishOld({ ok: true, status: 200, json: async () => usagePayload(20) });
+    expect(await old).toMatchObject({ usage: null, failure: 'cancelled' });
+    expect(JSON.parse(files[CACHE_FILE]).fiveHour).toBe(80);
+    expect(calls('write-global-claude-file')).toHaveLength(1);
+  });
+
+  it('does not turn schema drift into a fresh successful empty reading', async () => {
+    seedCredentials();
+    respondOk({ unrecognized: true });
+    const { fetchPlanUsageResult } = await loadClient();
+    expect(await fetchPlanUsageResult()).toEqual({ usage: null, failure: 'invalid-payload' });
+    expect(calls('write-global-claude-file')).toHaveLength(0);
+  });
+
+  it.each([{ five_hour: { utilization: 'twenty' } }, { limits: 'invalid' },
+    { limits: [null] }, { seven_day: [] }])('rejects malformed known fields: %j', async (body) => {
+    seedCredentials();
+    respondOk(body);
+    const { fetchPlanUsageResult } = await loadClient();
+    expect(await fetchPlanUsageResult()).toEqual({ usage: null, failure: 'invalid-payload' });
+    expect(calls('write-global-claude-file')).toHaveLength(0);
+  });
+
+  it('reports a real timeout while preserving the previous successful timestamp', async () => {
+    vi.useFakeTimers();
+    seedCredentials();
+    const cached = seedCache({}, 10 * 60000);
+    mockFetch.mockImplementation((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal!.addEventListener('abort', () => reject(new Error('aborted')));
+    }));
+    const { fetchPlanUsageResult } = await loadClient();
+    const work = fetchPlanUsageResult();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await work).toMatchObject({ failure: 'unavailable', usage: { timestamp: cached.timestamp } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

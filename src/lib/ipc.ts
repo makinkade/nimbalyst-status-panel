@@ -82,6 +82,12 @@ export interface TokenUsage {
   inputTokens?: number;
   outputTokens?: number;
   costUSD?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  reasoningTokens?: number;
+  providerCumulativeInputTokens?: number;
+  providerCumulativeOutputTokens?: number;
+  providerCumulativeCachedInputTokens?: number;
   contextWindow?: number;
   currentContext?: {
     tokens?: number;
@@ -112,6 +118,7 @@ export interface ClaudeUsage {
   fiveHour?: UsageWindow;
   sevenDay?: UsageWindow;
   sevenDayOpus?: UsageWindow;
+  weeklyModelLimits?: { model: string; utilization: number; resetsAt: string | null }[];
   lastUpdated?: number;
   error?: string;
 }
@@ -364,14 +371,40 @@ function timestamp(value: string | number | undefined): number {
 
 export async function getModels(): Promise<ModelInfo[]> {
   const result = await invoke<unknown>('ai:getModels');
-  if (Array.isArray(result)) return result as ModelInfo[];
-  if (result && typeof result === 'object') {
-    // Keyed by provider: { "claude-code": ModelInfo[], ... }
-    return Object.values(result as Record<string, unknown>)
-      .filter(Array.isArray)
-      .flat() as ModelInfo[];
+  return normalizeModels(result);
+}
+
+/**
+ * GET-222 observed both a flat display projection and richer grouped entries.
+ * maxTokens is an output limit, not context capacity. Normalize here rather
+ * than teaching every provider and renderer about the host's wrapper shapes.
+ */
+export function normalizeModels(result: unknown): ModelInfo[] {
+  if (!result || typeof result !== 'object') return [];
+  const record = result as Record<string, unknown>;
+  if (record.success === false) return [];
+  const groups = record.grouped && typeof record.grouped === 'object'
+    ? Object.values(record.grouped).filter(Array.isArray).flat() : [];
+  const flat = Array.isArray(result) ? result
+    : Array.isArray(record.models) ? record.models
+      : Object.values(record).filter(Array.isArray).flat();
+  const entries = new Map<string, ModelInfo>();
+  for (const value of [...flat, ...groups]) {
+    if (!value || typeof value !== 'object' || typeof value.id !== 'string') continue;
+    const key = JSON.stringify([value.id, typeof value.provider === 'string' ? value.provider : '']);
+    const previous = entries.get(key);
+    const contextWindow = typeof value.contextWindow === 'number' &&
+      Number.isFinite(value.contextWindow) && value.contextWindow > 0
+      ? value.contextWindow : previous?.contextWindow;
+    entries.set(key, {
+      id: value.id,
+      name: typeof value.name === 'string' ? value.name
+        : typeof value.display_name === 'string' ? value.display_name : previous?.name ?? value.id,
+      provider: typeof value.provider === 'string' ? value.provider : previous?.provider ?? '',
+      contextWindow,
+    });
   }
-  return [];
+  return [...entries.values()];
 }
 
 /**

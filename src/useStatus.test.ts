@@ -7,9 +7,9 @@
  * left the strip trailing a switch by up to five seconds, which is what this
  * second, much cheaper timer exists to fix.
  *
- * The timer itself is not covered here: the suite runs in a node environment
- * with no DOM, and the hook's effects need one. What is covered is the decision
- * the timer makes on every tick, which is where the behaviour actually lives.
+ * The helper remains covered here. GET-223 moved production orchestration into
+ * the DOM-free StatusController; statusController.test.ts now exercises the
+ * actual timers, subscriptions, scope boundaries and late-response cleanup.
  */
 
 import { describe, expect, it } from 'vitest';
