@@ -1,10 +1,11 @@
 import { extractTokenUsage, getServedModel, resolveEffortLevel } from './ipc';
 import type { ModelInfo, SessionRecord } from './ipc';
 import { providerIdentity } from './provider';
+import { parseModelId } from './modelNames';
 import { claudeAccountAdapter } from './providers/claude';
 import {
   measured, missing, type AccountUsage, type Reading, type ReadingScope,
-  type StatusCapabilities, type StatusModel, type TokenCounters, type CurrentContext, type ReasoningEffort,
+  type StatusCapabilities, type StatusModel, type TokenCounters, type CurrentContext, type ReasoningEffort, type WorkspacePolicy,
 } from './statusModel';
 
 export interface AccountIdentity {
@@ -28,6 +29,8 @@ export interface ProviderAdapter {
   id: string;
   capabilities: StatusCapabilities;
   readServedModel?: (sessionId: string) => Promise<string | null>;
+  /** Optional model-level constraint on a provider's configured effort default. */
+  canDefaultEffort?: (session: SessionRecord) => boolean;
   account?: AccountAdapter;
 }
 
@@ -51,11 +54,19 @@ export function createProviderRegistry(adapters: ProviderAdapter[] = []): Map<st
       ...known('claude-code', { servedModel: 'supported', effort: 'supported', context: 'supported',
         tokens: 'supported', accountUsage: 'supported' }),
       readServedModel: getServedModel, account: claudeAccountAdapter,
+      // Audited host controls support these unversioned aliases. A new/pinned
+      // ID without a session setting needs verified applicability, not a copied
+      // model-version table or an assumed High value (GET-224).
+      canDefaultEffort: (session) => {
+        const model = parseModelId(session.model);
+        return !!model && model.version === null && ['Opus', 'Sonnet', 'Haiku', 'Fable'].includes(model.family);
+      },
     }],
-    ['openai-codex', known('openai-codex', {
+    ['openai-codex', { ...known('openai-codex', {
       servedModel: 'unsupported', effort: 'supported', context: 'supported', tokens: 'supported',
       accountUsage: 'unknown',
-    })],
+    }), canDefaultEffort: (session) => !!session.model?.startsWith('openai-codex:') &&
+      !!session.model.slice('openai-codex:'.length).trim() }],
     ['copilot-cli', known('copilot-cli', {
       servedModel: 'unsupported', effort: 'unsupported', context: 'unsupported', tokens: 'unsupported',
     })],
@@ -78,6 +89,8 @@ export interface SessionInputs {
   models: ModelInfo[];
   defaultEffort: string | null;
   permissionMode: string | null;
+  workspacePolicy?: WorkspacePolicy | null;
+  workspacePolicySource?: string;
   servedModel?: Reading<string>;
   accounts?: Reading<AccountUsage>[];
   now?: number;
@@ -92,7 +105,8 @@ export function normalizeSessionStatus(input: SessionInputs, registry = provider
   const { workspacePath, session, models, permissionMode } = input;
   const now = input.now ?? Date.now();
   const provider = providerIdentity(session, models);
-  const { capabilities } = adapterFor(provider.id, registry);
+  const adapter = adapterFor(provider.id, registry);
+  const { capabilities } = adapter;
   const scope: ReadingScope = { kind: 'session', provider: provider.id, workspacePath,
     ...(session ? { sessionId: session.id } : {}) };
   const absent = <T>(capability: keyof StatusCapabilities, reason: string): Reading<T> =>
@@ -101,6 +115,9 @@ export function normalizeSessionStatus(input: SessionInputs, registry = provider
   const matches = models.filter((entry) => entry.id === session?.model &&
     (!provider.id || !entry.provider || entry.provider === provider.id));
   const catalog = matches.length === 1 ? matches[0] : undefined;
+  const servedMatches = models.filter((entry) => entry.id === input.servedModel?.value &&
+    (!provider.id || !entry.provider || entry.provider === provider.id));
+  const servedCatalog = servedMatches.length === 1 ? servedMatches[0] : undefined;
   const tokens = extractTokenUsage(session);
   const counters: TokenCounters = {};
   for (const key of ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadInputTokens',
@@ -119,19 +136,23 @@ export function normalizeSessionStatus(input: SessionInputs, registry = provider
       !tokens ? 'Token usage is not reported for this session' : 'Current context occupancy is not reported for this session');
 
   const explicitEffort = session?.metadata?.effortLevel;
+  const hasEffort = typeof explicitEffort === 'string' && !!explicitEffort.trim();
   const effort = session && capabilities.effort !== 'unsupported' &&
-    (capabilities.effort === 'supported' || (typeof explicitEffort === 'string' && !!explicitEffort))
+    (hasEffort || (capabilities.effort === 'supported' && (adapter.canDefaultEffort?.(session) ?? true)))
     ? measured(resolveEffortLevel(session, input.defaultEffort), 'configured-effort', scope, null, now)
-    : absent<ReasoningEffort>('effort', 'Reasoning effort is not reported by this provider');
+    : absent<ReasoningEffort>('effort', 'Configured reasoning effort is not reported for this model and provider');
+  const policy = input.workspacePolicy === undefined
+    ? (permissionMode ? { mode: permissionMode } : null) : input.workspacePolicy;
 
   return {
     session: session ? { id: session.id, title: session.title } : null, provider, capabilities,
-    model: session?.model ? measured({ requestedId: session.model, displayName: catalog?.name ?? null },
-      catalog ? 'sessions:get+ai:getModels' : 'sessions:get', scope, null, now)
+    model: session?.model ? measured({ requestedId: session.model, displayName: catalog?.name ?? null,
+      ...(servedCatalog?.name ? { servedDisplayName: servedCatalog.name } : {}) },
+      catalog || servedCatalog ? 'sessions:get+ai:getModels' : 'sessions:get', scope, null, now)
       : missing('unavailable', 'sessions:get', scope, session ? 'No model reported' : 'No session resolved', now),
     servedModel: input.servedModel ?? absent('servedModel', 'No verified served model is available'),
     effort,
-    workspacePolicy: permissionMode ? measured({ mode: permissionMode }, 'workspace:get-state',
+    workspacePolicy: policy ? measured(policy, input.workspacePolicySource ?? 'workspace:get-state',
       { kind: 'workspace', provider: null, workspacePath }, null, now)
       : missing('unavailable', 'workspace:get-state', { kind: 'workspace', provider: null, workspacePath },
         'Workspace permission policy is unavailable', now),

@@ -11,6 +11,7 @@ import {
   getDefaultEffortLevel,
   getFocusedSession,
   getServedModel,
+  getWorkspacePolicy,
   invokeQuiet,
   resolveEffortLevel,
   selectedSessionId,
@@ -62,6 +63,12 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Nimbalyst 0.83.0 runtime status payloads', () => {
+  it('preserves the observed raw workspace mode and classifier flag', async () => {
+    await expect(getWorkspacePolicy(state)).resolves.toEqual({ policy: {
+      mode: 'bypass-all', allowAllUsesClassifier: true,
+    }, source: 'workspace:get-state' });
+    expect(bridgeInvoke).not.toHaveBeenCalled();
+  });
   it('follows persisted selection when another provider has newer activity', async () => {
     expect(selectedSessionId(state)).toBe(codex.id);
     expect(Number(codex.updatedAt)).toBeGreaterThan(Number(claude.updatedAt));

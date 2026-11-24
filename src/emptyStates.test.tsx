@@ -75,7 +75,7 @@ describe('the strip with nothing behind it', () => {
 
   it('names the missing workspace state in the permission-mode placeholder', () => {
     const html = render('permissionMode', emptyStatus());
-    expect(html).toContain('Mode —');
+    expect(html).toContain('Workspace —');
     expect(html).toContain('Workspace permission policy is unavailable');
   });
 

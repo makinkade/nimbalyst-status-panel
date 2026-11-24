@@ -16,7 +16,7 @@ export type SegmentId = (typeof SEGMENT_IDS)[number];
 export const SEGMENT_LABELS: Record<SegmentId, string> = {
   model: 'Model',
   effort: 'Effort',
-  permissionMode: 'Permission mode',
+  permissionMode: 'Workspace policy',
   directory: 'Directory',
   branch: 'Git branch',
   context: 'Context usage',
@@ -27,13 +27,13 @@ export const SEGMENT_LABELS: Record<SegmentId, string> = {
 
 /** Popover tooltips: what each segment actually reports. */
 export const SEGMENT_DESCRIPTIONS: Record<SegmentId, string> = {
-  model: 'The model backing the active session, named from the model catalog.',
-  effort: 'Reasoning effort for the session -- how much thinking the model spends per turn.',
-  permissionMode: "The workspace's agent permission mode: Bypass, Auto, Plan or Default.",
+  model: 'The requested model and last observed served identity, using catalog names or readable IDs.',
+  effort: 'Configured reasoning effort, with session settings and applicable defaults distinguished. Effective effort is not reported.',
+  permissionMode: 'Workspace policy: Ask, Allow all, Bypass or Agent-verified. Provider approval, sandbox and network access are separate readings.',
   directory: 'The repo root folder when the workspace is a git repo, otherwise the workspace folder.',
   branch: 'Current git branch, with a count of uncommitted files.',
   context:
-    "How much of the model's context window the session occupies right now, with input and output token counts.",
+    'Reported current context occupancy and window, with separate session token counters even when no percentage is available.',
   // All three describe your Claude plan whatever session is focused, which is
   // why the chips qualify themselves beside a session from another provider.
   usage5h: 'Your rolling 5-hour Claude plan utilization, and when it resets.',

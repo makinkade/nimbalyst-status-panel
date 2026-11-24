@@ -16,6 +16,7 @@ import {
   getFocusedSession,
   getGitInfo,
   getServedModel,
+  getWorkspacePolicy,
   invoke,
   invokeQuiet,
   latestServedModel,
@@ -61,6 +62,18 @@ describe('invoke', () => {
 
     await expect(invoke('sessions:list')).resolves.toBeNull();
     expect(warn).toHaveBeenCalledOnce();
+  });
+});
+
+describe('workspace policy legacy and missing data (synthetic boundaries)', () => {
+  it('attributes a legacy app fallback honestly and leaves its classifier unknown', async () => {
+    bridgeInvoke.mockResolvedValue('bypass-all');
+    await expect(getWorkspacePolicy(null)).resolves.toEqual({ policy: { mode: 'bypass-all' }, source: 'app-settings:get' });
+  });
+
+  it('keeps a missing legacy policy unavailable', async () => {
+    bridgeInvoke.mockResolvedValue(null);
+    await expect(getWorkspacePolicy(null)).resolves.toBeNull();
   });
 });
 

@@ -6,13 +6,9 @@ import {
   folderName,
   formatCountdown,
   formatResetTime,
-  formatTokens,
-  permissionModeLabel,
-  titleCase,
 } from './lib/format';
-import type { EffortSource } from './lib/ipc';
-import { modelLabel } from './lib/modelNames';
-import { fixedClaudeUsage, type UsageBar } from './lib/statusPresentation';
+import { contextPresentation, effortPresentation, modelPresentation, permissionPresentation,
+  fixedClaudeUsage, type UsageBar } from './lib/statusPresentation';
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
 import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
 import { SegmentId } from './segments';
@@ -83,34 +79,16 @@ export function StatusPanel({ host }: { host: PanelHost }) {
   );
 }
 
-/**
- * The model chip's tooltip: the session, the alias it asked for, and -- once a
- * turn has been answered -- the concrete model that answered it. The label is
- * derived from those ids, so the ids themselves belong somewhere you can read
- * them when the label looks wrong.
- */
-function describeModel(status: Status): string {
-  const { session, model, servedModel: reading } = status.readings;
-  const requested = model.value?.requestedId ?? 'unknown model';
-  const servedModel = reading.value;
-  const served = servedModel && servedModel !== requested ? `, served by ${servedModel}` : '';
-  return `${session?.title ?? 'Untitled'} — ${requested}${served}${reading.reason ? `. ${reading.reason}` : ''}`;
-}
-
 /** Exported for the segment tests, which render the strip without a DOM. */
 export function buildSegments(status: Status, workspacePath: string): Record<SegmentId, ReactNode> {
   const { readings, git } = status;
-  const { session, model } = readings;
-  const servedModel = readings.servedModel.value;
-  const effort = readings.effort.value?.level;
-  const effortSource = readings.effort.value?.source ?? null;
-  const permissionMode = readings.workspacePolicy.value?.mode;
-  const tokens = readings.tokens.value;
+  const model = modelPresentation(readings);
+  const effort = effortPresentation(readings);
+  const permission = permissionPresentation(readings);
+  const context = contextPresentation(readings);
   // What currently occupies the window, not what the session has billed.
-  const contextTokens = readings.context.value?.tokens;
-  const contextWindow = readings.context.value?.window ?? undefined;
   const contextPercent = readings.context.value?.percent ?? null;
-  const contextAccent = readings.context.state === 'stale' ? MUTED : contextColor(contextPercent ?? 0);
+  const contextAccent = readings.context.state === 'stale' || contextPercent === null ? MUTED : contextColor(contextPercent);
 
   // Repo root name when in a git repo, else the folder name -- as in the status line.
   const displayPath = folderName(git.repoPath ?? workspacePath);
@@ -124,30 +102,26 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
     model: (
       <Chip
         icon="smart_toy"
-        accent={model.state === 'stale' || readings.servedModel.state === 'stale' ? MUTED : PALETTE.teal}
-        title={session ? describeModel(status) : undefined}
+        accent={model.muted ? MUTED : PALETTE.teal}
+        title={model.title}
       >
-        {modelLabel({
-          sessionModel: model.value?.requestedId,
-          servedModel,
-          catalogName: model.value?.displayName,
-        }) ?? (session ? 'Model —' : 'No session')}
+        {model.label}
       </Chip>
     ),
 
-    effort: effort ? (
-      <Chip icon="bolt" accent={readings.effort.state === 'stale' ? MUTED : PALETTE.green} title={describeEffort(effort, effortSource)}>
-        {titleCase(effort)}
+    effort: (
+      <Chip icon="bolt" accent={effort.muted ? MUTED : PALETTE.green} title={effort.title}>
+        {effort.label}
       </Chip>
-    ) : <Chip icon="bolt" accent={MUTED} title={readings.effort.reason ?? undefined}>Effort —</Chip>,
+    ),
 
-    permissionMode: permissionMode ? (
+    permissionMode: permission.label ? (
       <Chip
         icon="shield"
-        accent={readings.workspacePolicy.state === 'stale' ? MUTED : permissionModeColor(permissionModeLabel(permissionMode))}
-        title={`Workspace permission mode: ${permissionMode}`}
+        accent={permission.muted ? MUTED : permissionModeColor(permission.label)}
+        title={permission.title}
       >
-        {permissionModeLabel(permissionMode)}
+        Workspace: {permission.label}
       </Chip>
     ) : (
       // Visible placeholder rather than a vanished chip: a missing value should
@@ -155,9 +129,9 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
       <Chip
         icon="shield"
         accent={MUTED}
-        title={readings.workspacePolicy.reason ?? undefined}
+        title={permission.title}
       >
-        <span className="sp-label">Mode —</span>
+        <span className="sp-label">Workspace —</span>
       </Chip>
     ),
 
@@ -188,35 +162,32 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
         accent={MUTED}
         title={
           git.repoPath
-            ? 'git:branches returned no current branch'
-            : `${workspacePath} is not a git repository`
+            ? 'The current branch is not available'
+            : workspacePath ? `${workspacePath} is not a git repository` : 'No workspace folder open'
         }
       >
         <span className="sp-label">{git.repoPath ? 'Branch —' : 'No repo'}</span>
       </Chip>
     ),
 
-    context:
-      contextPercent !== null ? (
-        <Chip
-          icon="database"
-          accent={contextAccent}
-          title={`${formatTokens(contextTokens)} of ${formatTokens(contextWindow)} tokens in context`}
-        >
-          <span className="sp-label">Context</span>
-          <Bar percent={contextPercent} color={contextAccent} />
-          <span className="sp-value">{Math.round(contextPercent)}%</span>
-          {(tokens?.inputTokens !== undefined || tokens?.outputTokens !== undefined) && (
-            <span className="sp-tokens">
-              ↑{formatTokens(tokens?.inputTokens)} ↓{formatTokens(tokens?.outputTokens)}
-            </span>
-          )}
-        </Chip>
-      ) : (
-        <Chip icon="database" accent={MUTED} title={readings.context.reason ?? 'No context window known'}>
-          <span className="sp-label">Context —</span>
-        </Chip>
-      ),
+    context: (
+      <Chip
+        icon="database"
+        accent={contextAccent}
+        title={context.title}
+      >
+        <span className="sp-label">{contextPercent !== null || context.occupancy ? 'Context' : 'Context —'}</span>
+        {contextPercent !== null ? (
+          <>
+            <Bar percent={contextPercent} color={contextAccent} />
+            <span className="sp-value">{Math.round(contextPercent)}%</span>
+          </>
+        ) : context.occupancy && <span className="sp-value">{context.occupancy}</span>}
+        {context.tokenSummary && (
+          <span className="sp-tokens">{context.tokenSummary}{context.tokenStale ? ' (stale)' : ''}</span>
+        )}
+      </Chip>
+    ),
 
     usage5h: bars.fiveHour ? (
       <UsageChip bar={bars.fiveHour} />
@@ -249,17 +220,6 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
       </Chip>
     ),
   };
-}
-
-/** Reasoning effort, plus where the value was resolved from. */
-function describeEffort(effort: string, source: EffortSource | null): string {
-  const origin =
-    source === 'session'
-      ? "this session's own setting"
-      : source === 'app-default'
-        ? 'the app default effort level'
-        : 'the built-in default (no session or app value set)';
-  return `Configured reasoning effort: ${titleCase(effort)}, from ${origin}.`;
 }
 
 /**

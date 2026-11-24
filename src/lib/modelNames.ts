@@ -39,9 +39,8 @@ const WORD = /^[a-z]+$/;
  * (`claude-code:opus-1m`, `claude-code:opus-4-8`, `claude-code:sonnet`).
  *
  * Only Claude ids are parsed -- a `claude-code:` prefix, or an id that starts
- * with `claude-`. Anything else returns null so the caller shows the raw id:
- * `openai-codex:gpt-6` would otherwise come out as a confident `Gpt 6`, and
- * that is a label for somebody else's naming scheme, not ours to invent.
+ * with `claude-`. Other naming schemes use their supplied catalog name or
+ * conservative separator formatting, without interpreting a version.
  *
  * An id with more than one word in it is rejected too, rather than guessed at.
  * Nothing Claude-shaped has one today, and a wrong label is worse than the raw
@@ -102,40 +101,37 @@ export interface ModelLabelInputs {
   servedModel?: string | null;
   /** Nimbalyst's own name for `sessionModel`, when its catalog has one. */
   catalogName?: string | null;
+  /** A supplied name for the served ID, never the requested alias's name. */
+  servedCatalogName?: string | null;
 }
 
 /**
- * The label for the model chip.
- *
- * In order of how much each source can be trusted to be current:
- *
- * 1. **A pinned alias** (`opus-4-8`, `fable-5`) names its version in the id,
- *    and a pin is exact by definition. Nothing else can know better.
- * 2. **The served model**, for a bare alias (`opus`) -- but only when its
- *    family matches the alias. Switch a session from Sonnet to Opus and the
- *    newest turn on record is still Sonnet's until the next reply; reading
- *    `Sonnet 5` off it beside an Opus session would be exactly wrong.
- * 3. **Nimbalyst's catalog name.** Maintained by hand upstream, so it can lag a
- *    release, but it is the best available before the session's first reply.
- * 4. **The bare alias**, with no version: `Opus (1M)`. Honest about knowing
- *    only the family, rather than claiming a version that may be stale.
- * 5. **The raw id**, for anything that is not a Claude model at all.
- *
- * The `(1M)` marker always comes from the session's alias: the served id does
- * not carry the context variant, and the alias is what chose it.
+ * GET-224: cosmetic formatting only, without inventing a vendor display name.
+ * Preserve case, dots, digits and snapshot dates. The exact ID stays in the
+ * model tooltip; separators are the only information removed from the label.
  */
-export function modelLabel({ sessionModel, servedModel, catalogName }: ModelLabelInputs): string | null {
+export function readableModelId(id: string): string {
+  return id.trim().replace(/[:/_-]+/g, ' ').replace(/\s+/g, ' ').trim() || id.trim();
+}
+
+/**
+ * A served identity wins over a requested pin when it has actually been read.
+ * This formats identities, not their time/correlation: modelPresentation labels
+ * disagreements as "Last reply" so an old turn cannot impersonate a new request.
+ * The `(1M)` marker describes the requested variant, not a served capacity.
+ */
+export function modelLabel({ sessionModel, servedModel, catalogName, servedCatalogName }: ModelLabelInputs): string | null {
   const alias = parseModelId(sessionModel);
   const oneMillion = alias?.oneMillion ?? false;
-
-  if (alias?.version) return format(alias, oneMillion);
-
   const served = parseModelId(servedModel);
-  if (served?.version && (!alias || alias.family === served.family)) {
-    return format(served, oneMillion);
+  if (servedModel?.trim()) {
+    // Claude's concrete ID avoids outdated version names in the host catalog.
+    if (served?.version) return format(served, oneMillion);
+    return servedCatalogName?.trim() && servedCatalogName.trim() !== servedModel.trim()
+      ? servedCatalogName.trim() : readableModelId(servedModel);
   }
-
-  if (catalogName) return catalogName;
+  if (alias?.version) return format(alias, oneMillion);
+  if (catalogName?.trim() && catalogName.trim() !== sessionModel?.trim()) return catalogName.trim();
   if (alias) return format(alias, oneMillion);
-  return sessionModel || null;
+  return sessionModel?.trim() ? readableModelId(sessionModel) : null;
 }

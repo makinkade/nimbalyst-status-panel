@@ -8,6 +8,7 @@
  */
 
 import { parseModelId } from './modelNames';
+import type { WorkspacePolicy } from './statusModel';
 
 interface ElectronBridge {
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
@@ -480,32 +481,27 @@ export async function getUsage(): Promise<ClaudeUsage | null> {
 }
 
 /**
- * Workspace permission mode. `bypass-all` / `allow-all` / `ask`, which is the
- * setting Nimbalyst actually applies -- deliberately not the per-session
- * Shift+Tab mode the CLI status line reads out of the transcript.
- *
- * There is no stored `auto` value; auto mode is a combination. Nimbalyst keeps
- * `agentPermissions: { permissionMode, allowAllUsesClassifier }`, and
- * `bypass-all` with the classifier ON launches Claude Code in auto mode -- the
- * classifier screens every tool call. Reading `permissionMode` alone therefore
- * reports "Bypass" for a workspace that is really in Auto. `bypass-all` with
- * the classifier off is genuine bypass and stays "Bypass".
+ * GET-224: preserve the workspace policy, including whether bypass uses the
+ * automatic reviewer. This pair is not a provider's effective execution mode.
+ * Carry the source so a legacy app fallback is not attributed to workspace IPC.
  */
-export async function getPermissionMode(state: WorkspaceState | null): Promise<string | null> {
+export async function getWorkspacePolicy(state: WorkspaceState | null): Promise<{
+  policy: WorkspacePolicy; source: string;
+} | null> {
   // The real home of the value: workspace state -> agentPermissions.permissionMode.
   // (`agentPermissionMode` only exists as a flattened field in the settings
   // overview, not as a settings key.) The state itself is fetched once by the
   // caller and shared with `selectedSessionId`.
   const mode = state?.agentPermissions?.permissionMode ?? state?.agentPermissionMode;
   if (typeof mode === 'string' && mode) {
-    if (mode === 'bypass-all' && state?.agentPermissions?.allowAllUsesClassifier === true) {
-      return 'auto';
-    }
-    return mode;
+    const classifier = state?.agentPermissions?.allowAllUsesClassifier;
+    return { policy: { mode, ...(typeof classifier === 'boolean' ? { allowAllUsesClassifier: classifier } : {}) },
+      source: 'workspace:get-state' };
   }
 
   const fallback = await invoke<string>('app-settings:get', 'agentPermissionMode');
-  return typeof fallback === 'string' && fallback ? fallback : null;
+  return typeof fallback === 'string' && fallback
+    ? { policy: { mode: fallback }, source: 'app-settings:get' } : null;
 }
 
 /**
@@ -594,10 +590,10 @@ export function resolveEffortLevel(
   appDefault: string | null,
 ): ResolvedEffort {
   const fromSession = session?.metadata?.effortLevel;
-  if (typeof fromSession === 'string' && fromSession) {
-    return { level: fromSession, source: 'session' };
+  if (typeof fromSession === 'string' && fromSession.trim()) {
+    return { level: fromSession.trim(), source: 'session' };
   }
-  if (appDefault) return { level: appDefault, source: 'app-default' };
+  if (appDefault?.trim()) return { level: appDefault.trim(), source: 'app-default' };
   return { level: DEFAULT_EFFORT_LEVEL, source: 'builtin' };
 }
 

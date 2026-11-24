@@ -40,6 +40,8 @@ export function permissionModeColor(label: string): string {
     case 'Plan':
       return PALETTE.purple;
     case 'Auto':
+    case 'Agent-verified':
+    case 'Allow all':
       return PALETTE.yellow;
     case 'Bypass':
       return PALETTE.red;

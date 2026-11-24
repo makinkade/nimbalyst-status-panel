@@ -2,7 +2,7 @@
 
 *A Nimbalyst bottom panel showing model, context usage and plan limits for the session you are talking to.*
 
-Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the focused Agent session: which model it is running, at what reasoning effort and permission mode, where it is working, and how much of the context window and of your Claude plan you have used. Everything updates live as the session runs.
+Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the focused Agent session: its requested model and last observed reply, configured reasoning effort, workspace policy, working folder and git branch, current context and token counters. Available readings update as the session runs. Separate plan chips report your Claude allowance.
 
 ![The chip strip on a dark theme: model, effort, permission mode, directory, branch, context usage and Claude plan limits](screenshots/status-panel-dark.png)
 
@@ -12,12 +12,12 @@ Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the f
 
 | Chip | Content |
 | --- | --- |
-| Model | Display name of the session's model |
-| Effort | Configured reasoning effort, e.g. `High`, or a placeholder when it is not reported |
-| Permission mode | Workspace policy: `Bypass` / `Auto` / `Plan` / `Default`; not the session sandbox |
+| Model | Catalog name or readable ID; verified served identity when available, with requested and past-reply IDs in the tooltip |
+| Effort | Configured effort, e.g. `High`; applicable defaults say `(default)`, and missing values have a placeholder |
+| Workspace policy | `Workspace: Ask` / `Allow all` / `Bypass` / `Agent-verified`; separate from provider approval, sandbox and network access |
 | Directory | Repo root folder name when in a git repo, else the workspace folder |
 | Branch | Current branch, with `±n` uncommitted-file count |
-| Context | Usage bar, percentage, and `↑input ↓output` token counts |
+| Context | Reported current occupancy and window; separate token counters remain available even without a percentage |
 | 5h / 7d | Claude plan utilization bars with reset times |
 | Scoped caps | Model-scoped plan limits, e.g. `7d Fable` |
 
@@ -39,9 +39,15 @@ The check is a setting — **Behavior → Check for updates** in the gear popove
 
 The version you are running is named at the foot of that same popover, and when a newer release is known it shows both — `0.1.5 → 0.1.6 available`.
 
-## Claude Code support
+## Model and provider support
 
-The plan chips still report Claude usage only. Model names use the host catalog or a readable ID fallback, with Claude's served-model version preserved. Directory, branch and workspace policy work independently of provider support. Effort and context use reported data and audited capabilities; a missing or unsupported reading stays a placeholder instead of becoming a guessed effort or zero usage.
+Common cards work with Claude Code, ChatGPT/Codex, Copilot, Cursor and custom providers, including unfamiliar model IDs. Names use the host catalog or a readable ID fallback. Claude's concrete reply version is parsed from its ID without a version table. A reply that disagrees with the requested model, or cannot be refreshed, says `Last reply` rather than claiming the new request has already been served. Exact requested/served IDs and provider are in the tooltip. Other providers keep their requested identity when the host cannot report a served model.
+
+Effort is configured, not acknowledged effective effort. Its tooltip distinguishes a session setting from an applicable app or built-in default; defaults also say `(default)` on the chip. Unknown models do not inherit an unverified default. Copilot and Cursor do not expose effort through the examined host integration. Workspace policy retains its own labels and automatic-review flag. Provider approval policy, sandbox, filesystem and network restrictions are listed separately in the tooltip; the current host does not report their effective session values.
+
+Context percentages use current occupancy, never accumulated billed tokens. A measured zero is 0%; occupancy without a known capacity shows tokens without a bar. The context card keeps available input/output or total counters even when no context snapshot is reported. Its tooltip separates cumulative, cache and reasoning counters; absent individual counts do not become zero. Copilot's synthetic zero usage is not a measurement. Cursor reports token counts without a context percentage. Directory, branch and workspace policy remain useful without a session or provider-specific adapter.
+
+Real host fixtures cover Claude and Codex. Copilot/Cursor capabilities come from host source inspection; custom/future model cases have automated fallback coverage. This does not claim live execution has been verified for every provider.
 
 Beside a session from another provider (Copilot, Cursor, Codex), or a session with an unknown provider, the plan chips relabel to `Claude 5h` / `Claude 7d` and render muted. Their tooltips name the provider and explain that the reading comes from the Claude login/config source; association with the selected session's account is unverified. No other provider's quota is reported. Switching sessions clears the old session's readings while the new selection resolves. Existing segment order and visibility preferences are preserved.
 

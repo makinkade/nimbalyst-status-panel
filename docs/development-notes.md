@@ -22,7 +22,7 @@ Considered and not built:
 ## Decisions
 
 1. **Session tracked** — follows the session selected in the sidebar (GET-102). Nimbalyst keeps focus in a renderer atom extensions cannot read (`session:get-active` is a stub returning `null`), but every selection change is also persisted to workspace state as `agenticCodingWindowState.selectedWorkstream`, which `workspace:get-state` returns. That is the selection itself rather than a proxy for it, and it survives a restart. A worktree or workstream selection names the group, so it is resolved to the session on screen through `worktreeActiveSessions` or `workstreamStates[id].activeChildId`. When the workspace has no persisted selection yet, the panel falls back to the session with the newest `metadata.metadata.lastReadAt`, then to the most recently updated one. `lastReadAt` is only the second choice because two things write it without a session switch: the tray's "clear all unread", which stamps one timestamp onto every unread session, and `sessions:sync-read-state`, which can import one from another machine. Before GET-102 the panel used *the most recently updated session* alone, so switching sessions changed nothing until you prompted the new one. See `selectedSessionId` and `getFocusedSession` in `src/lib/ipc.ts`.
-2. **Permission mode** — the workspace value (`agentPermissionMode`), not the per-session Shift+Tab mode the script parses out of the transcript. There is no stored `auto` value: `agentPermissions.permissionMode` of `bypass-all` combined with `allowAllUsesClassifier: true` is what Nimbalyst launches as auto mode, so the panel reports that pair as `Auto` and keeps `Bypass` for `bypass-all` with the classifier off.
+2. **Workspace policy** — preserve `agentPermissions.permissionMode` and `allowAllUsesClassifier` independently (GET-224). The chip says `Workspace: Agent-verified` for classifier-enabled bypass, `Bypass` for bypass without a known enabled classifier, `Allow all` for allow-all and `Ask` for ask. A missing classifier flag stays unknown in the tooltip. These are workspace labels, not translations to Claude modes or proof of provider approval, sandbox, filesystem or network restrictions. The earlier CLI-style `Auto` label conflated different policies.
 3. **Refresh** — event subscriptions (`sessions:session-updated`, `sessions:session-created`, `sessions:refresh-list`, `open-ai-session` window event) plus two timers for values nothing broadcasts. Nothing announces a selection change, so a 1 s `SELECTION_POLL_MS` asks only `workspace:get-state`, which the host answers from memory, and triggers a full refresh when the selected session has changed. The full refresh runs every 5 s on its own, and stays at that rate because it shells out to git three times.
 4. **Layout** — horizontal chip strip, wrapping.
 5. **Keybinding** — `Ctrl+Shift+S`. Verified free: Nimbalyst's `file` shortcut group has no `saveAs` entry and nothing in the app binds `Shift+S`.
@@ -42,7 +42,7 @@ src/
   lib/providers/claude.ts # Claude account adapter and direct/host normalization
   lib/accountMonitor.ts # adapter subscriptions, auth epochs and 60s Claude cadence
   lib/accountUsageCache.ts # scoped, memory-only cache and shared requests
-  lib/statusPresentation.ts # compatibility projection for the existing fixed usage IDs
+  lib/statusPresentation.ts # common card labels/tooltips and fixed usage projection
   components/Chip.tsx      # Chip + Bar
   components/ConfigChip.tsx # gear chip + segment picker popover
   segments.ts         # segment registry, default order, config reconciliation
@@ -65,9 +65,9 @@ src/
 | Segment | Channel |
 | --- | --- |
 | Session | `workspace:get-state` → `selectedWorkstream`, else newest `lastReadAt`, else newest `updated_at`, resolved through `sessions:list(workspacePath, opts)` + `sessions:get(id)` (GET-102) |
-| Model | Version from the latest main-thread turn's served model via `transcript:get-tail-messages`, parsed rather than looked up (GET-111); `ai:getModels()` name as fallback |
+| Model | Requested catalog name/readable ID, with the last observed main-thread served model via `transcript:get-tail-messages` preferred where available. Disagreement/stale replies say `Last reply`; IDs and scope remain in the tooltip. Claude versions are parsed, never looked up. |
 | Context window | `tokenUsage.currentContext.contextWindow`, then `tokenUsage.contextWindow`, then model catalog context window; see the catalog shape caveat in the provider audit below |
-| Effort | `session.metadata.effortLevel`, then `settings:get-default-effort-level`, then the panel's built-in `high`; configured effort, not a universal provider capability |
+| Effort | Explicit `session.metadata.effortLevel`, otherwise app/built-in default only for audited applicable integration/model support. Defaults are labeled; missing applicability is a placeholder. This is configured effort, not provider-acknowledged effective effort. |
 | Permission mode | `workspace:get-state` → `agentPermissions` first; `app-settings:get("agentPermissionMode")` is a legacy fallback. This is workspace policy, not a session's effective restrictions. |
 | Branch / dirty | `git:is-repo`, `git:branches`, `git:get-uncommitted-files` |
 | Tokens | `session.metadata.tokenUsage` |
@@ -75,7 +75,7 @@ src/
 
 ### Plan usage
 
-When the panel was built, `claude-usage:get` mapped only `five_hour`, `seven_day`, and `seven_day_opus`, so the panel calls the usage endpoint itself for model-scoped caps like `7d Fable`. The GET-222 audit below found that host 0.83.0 also maps weekly scoped limits to `weeklyModelLimits`; the panel's current fallback type and renderer do not consume that newer field. The direct client's shared-cache contract remains unchanged.
+When the panel was built, `claude-usage:get` mapped only `five_hour`, `seven_day`, and `seven_day_opus`, so the panel calls the usage endpoint itself for model-scoped caps like `7d Fable`. The GET-222 audit found that host 0.83.0 also maps weekly scoped limits to `weeklyModelLimits`; GET-223 added that field to the Claude adapter's normalized fallback. The direct client's shared-cache contract remains unchanged.
 
 `src/lib/planUsage.ts` reads the OAuth token from `.credentials.json`, `GET`s `https://api.anthropic.com/api/oauth/usage` with `anthropic-beta: oauth-2025-04-20`, and shapes the response the way `~/.claude/get-plan-usage.ps1` does — including `allLimits`, the diagnostic record of every entry in `limits[]`. Nothing is spawned; both files are reached through `read-global-claude-file` / `write-global-claude-file`, which resolve the Claude config directory host-side and honour `CLAUDE_CONFIG_DIR`. `permissions.filesystem` is still required, because that is what gates reading the credentials file.
 
@@ -380,6 +380,50 @@ dependency was added. The running panel was not restarted/reloaded, so real
 provider/account switching, failure handling and theme checks on the new bundle
 remain unverified. The build alone does not update the mounted extension.
 
+## Common session cards (GET-224)
+
+Card presentation now consumes the shared scoped readings in
+[statusPresentation.ts](../src/lib/statusPresentation.ts). Catalog display names
+win for generic models; fallback formatting preserves case, digits and dots and
+only separates ID delimiters. The exact requested/served IDs and provider
+remain in the tooltip.
+
+A verified served reading can override a requested pin, but a disagreement or
+stale reading is visibly labeled Last reply. Transcript identity proves a past
+reply, not that the current request has been served or rerouted. Missing served
+identity stays missing on the audited Codex/Copilot/Cursor paths. Claude's 1M
+marker describes the requested variant, not a measured served capacity.
+
+Effort is configured. Session metadata takes precedence; applicable app/built-in
+defaults say (default). The Claude adapter defaults only audited unversioned
+aliases, without a model-version table; an unfamiliar or pinned ID without an
+explicit setting stays unavailable until applicability is verified. The Codex
+integration accepts its namespaced model IDs. Custom adapters can constrain
+default applicability independently. Nothing here reconstructs effective effort
+or its host-side clamp.
+
+getWorkspacePolicy carries the raw mode/classifier pair and the actual source,
+including the legacy app-settings fallback. Missing classifier data is unknown,
+not false. The existing permission segment is now labeled Workspace policy,
+without changing its stored ID. Its tooltip names provider approval/reviewer,
+sandbox, filesystem and network readings individually. These effective fields
+remain unavailable pending GET-229; no launch profile is inferred from policy.
+
+Context percentage still uses current occupancy and applicable capacity. Without
+capacity, measured occupancy stays visible without a percentage/bar. Session
+counter summaries remain in the same card even when context is unsupported.
+Cumulative input/output/total, cache creation/read, reasoning and provider
+cumulative counters have separate tooltip labels; missing values are omitted
+rather than formatted as zero. Token-only providers never get a made-up
+occupancy. Copilot's synthetic zero completion remains unsupported.
+
+Tests render the production normalized cards against the GET-222 Claude/Codex
+fixture. Source-derived Copilot/Cursor and synthetic custom/future/missing-data
+cases are labeled separately. Controller coverage also checks rendered output
+after selection/model/provider boundaries and late replies. These checks do not
+substitute for a restarted-panel check, real switching, compaction/resume or
+live Copilot/Cursor/custom execution; those remain GET-227 validation work.
+
 ## Marketplace readiness (backlog)
 
 Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 built-ins plus Astro, Electronics Studio, Jupyter, Mindmap, Namenym, Replicad and Slides, none of which surface session state. Publishing would mean closing these gaps, all of which exist because this was built for one machine:
@@ -387,7 +431,7 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 1. **~~Cross-platform usage fetch.~~** Done — nothing is exec'd, so there is no command left to make portable.
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
-4. **Non-Claude providers.** Still Claude-first, but no longer silently misleading — see [Claude Code support](../README.md#claude-code-support) and the marketplace `longDescription`. ~~Still to decide: hide the irrelevant chips or show honest placeholders.~~ Decided in GET-103, for honest placeholders: beside a session whose provider is not `claude-code`, the plan chips relabel to `Claude 5h` / `Claude 7d` / `Claude 7d Fable`, render in the muted accent rather than green/yellow/red, and name the session's actual provider in their tooltip. GET-223 extends this safeguard to an unknown selected provider. Identity now prefers the explicit session field, then unambiguous catalog metadata, then the model prefix. Model names use the catalog or supplied ID, while quota collection remains Claude-specific. The common contract and adapter registry are in place; dynamic usage settings and other-provider quota collectors remain follow-up work.
+4. **Non-Claude providers.** Still Claude-first, but no longer silently misleading — see [Model and provider support](../README.md#model-and-provider-support) and the marketplace `longDescription`. ~~Still to decide: hide the irrelevant chips or show honest placeholders.~~ Decided in GET-103, for honest placeholders: beside a session whose provider is not `claude-code`, the plan chips relabel to `Claude 5h` / `Claude 7d` / `Claude 7d Fable`, render in the muted accent rather than green/yellow/red, and name the session's actual provider in their tooltip. GET-223 extends this safeguard to an unknown selected provider. Identity now prefers the explicit session field, then unambiguous catalog metadata, then the model prefix. Model names use the catalog or supplied ID, while quota collection remains Claude-specific. The common contract and adapter registry are in place; dynamic usage settings and other-provider quota collectors remain follow-up work.
 5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](../LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). ~~Version and author identity~~ are done too (GET-93) — see [Published identity](#published-identity). ~~`screenshots`~~ are done too (GET-94) — `screenshots/status-panel-dark.png` and `-light.png`, wired as one entry's `src` and `srcLight`. An external extension must bundle real PNGs: `fileToOpen`/`selector` drive the internal capture pipeline only, and the registry's own `extensions.nimbalyst.com/screenshots/<id>/` is an R2 bucket nobody outside Nimbalyst can write to. `screenshots/` was already in the packaging script's file list, so the PNGs ship with the `.nimext` as well as heading this README.
 
 Publishing route is settled: **the registry is first-party only.** Every live entry is authored by Nimbalyst under `com.nimbalyst.*`, and `registry.json` is a generated artifact pushed to Nimbalyst's own R2 bucket rather than a file anyone can PR — being listed means a maintainer adds a local path to `packages/marketplace/release-extensions.txt`, which is a favour rather than a process. The docs' offer to "publish an extension you built yourself" has no workflow behind it.

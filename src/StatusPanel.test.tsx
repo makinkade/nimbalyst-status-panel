@@ -256,7 +256,8 @@ describe('the model chip', () => {
     const html = renderModel(
       codexStatus({ session: OPUS_SESSION, servedModel: 'claude-opus-5-5' }),
     );
-    expect(html).toContain('claude-code:opus-1m, served by claude-opus-5-5');
+    expect(html).toContain('Requested model: claude-code:opus-1m');
+    expect(html).toContain('Last observed reply served by: claude-opus-5-5');
   });
 
   it('says only what it knows before the first reply', () => {

@@ -1,5 +1,5 @@
 import {
-  getDefaultEffortLevel, getFocusedSession, getGitInfo, getModels, getPermissionMode,
+  getDefaultEffortLevel, getFocusedSession, getGitInfo, getModels, getWorkspacePolicy,
   getWorkspaceState, on, onWindowEvent, selectedSessionId,
   type GitInfo, type WorkspaceState,
 } from './lib/ipc';
@@ -32,7 +32,7 @@ export function shouldRefreshForSelection(observed: string | null, acted: string
 }
 
 const defaults = { getWorkspaceState, getFocusedSession, getGitInfo, getModels,
-  getDefaultEffortLevel, getPermissionMode, on, onWindowEvent,
+  getDefaultEffortLevel, getWorkspacePolicy, on, onWindowEvent,
   registry: providerRegistry, relatedAccounts: [claudeAccountAdapter] as AccountAdapter[] };
 export type StatusDependencies = typeof defaults;
 
@@ -139,9 +139,9 @@ export class StatusController {
     const valid = () => this.active && generation === this.generation;
     let work!: Promise<void>;
     work = (async () => {
-      const [session, models, defaultEffort, permissionMode, git] = await Promise.all([
+      const [session, models, defaultEffort, policy, git] = await Promise.all([
         this.deps.getFocusedSession(this.workspacePath, workspace), this.deps.getModels(),
-        this.deps.getDefaultEffortLevel(), this.deps.getPermissionMode(workspace),
+        this.deps.getDefaultEffortLevel(), this.deps.getWorkspacePolicy(workspace),
         this.deps.getGitInfo(this.workspacePath),
       ]);
       if (!valid()) return;
@@ -158,7 +158,8 @@ export class StatusController {
       const publishSession = (servedModel?: Reading<string>) => this.emit({
         workspacePath: this.workspacePath, git, loading: false,
         readings: normalizeSessionStatus({ workspacePath: this.workspacePath, session, models,
-          defaultEffort, permissionMode, servedModel,
+          defaultEffort, permissionMode: null, workspacePolicy: policy?.policy ?? null,
+          workspacePolicySource: policy?.source, servedModel,
           accounts: [...this.accounts.values()].map((entry) => ageReading(entry)) }, this.deps.registry),
       });
       // Common status and quota work must not wait on an optional transcript

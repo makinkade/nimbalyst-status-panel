@@ -78,7 +78,17 @@ export interface StatusCapabilities {
   accountUsage: Capability;
 }
 
-export interface ModelIdentity { requestedId: string; displayName: string | null }
+export interface ModelIdentity {
+  requestedId: string;
+  displayName: string | null;
+  /** Only populated from an unambiguous catalog match to the actual served ID. */
+  servedDisplayName?: string;
+}
+export interface WorkspacePolicy {
+  mode: string;
+  /** Keep the classifier flag: bypass with automatic review is a different policy. */
+  allowAllUsesClassifier?: boolean;
+}
 export interface ReasoningEffort { level: string; source: 'session' | 'app-default' | 'builtin' }
 export interface CurrentContext { tokens: number; window: number | null; percent: number | null }
 export interface TokenCounters {
@@ -128,7 +138,7 @@ export interface StatusModel {
   model: Reading<ModelIdentity>;
   servedModel: Reading<string>;
   effort: Reading<ReasoningEffort>;
-  workspacePolicy: Reading<{ mode: string }>;
+  workspacePolicy: Reading<WorkspacePolicy>;
   execution: Reading<ExecutionRestrictions>;
   context: Reading<CurrentContext>;
   tokens: Reading<TokenCounters>;

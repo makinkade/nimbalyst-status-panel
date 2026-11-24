@@ -1,9 +1,12 @@
 import { readFileSync } from 'node:fs';
+import { createElement, Fragment } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StatusController, type Status, type StatusDependencies } from './statusController';
 import { latestServedModel, normalizeModels, selectedSessionId, type SessionRecord, type WorkspaceState } from './lib/ipc';
 import { adapterFor, createProviderRegistry, type AccountAdapter, type AccountIdentity } from './lib/providerAdapters';
 import { measured, type AccountUsage, type ReadingScope } from './lib/statusModel';
+import { buildSegments } from './StatusPanel';
 
 const fixture = JSON.parse(readFileSync(new URL('./lib/fixtures/status-host-0.83.0.json', import.meta.url), 'utf8'));
 const payload = (channel: string, index = 0) => fixture.observations.filter((row: { channel: string }) => row.channel === channel)[index].payload;
@@ -17,6 +20,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const flush = () => vi.advanceTimersByTimeAsync(0);
+function rendered(status: Status) {
+  const segments = buildSegments(status, status.workspacePath);
+  return ['model', 'effort', 'permissionMode', 'context'].map((id) =>
+    renderToStaticMarkup(createElement(Fragment, null, segments[id as keyof typeof segments]))).join('');
+}
 const stateFor = (id: string | null): WorkspaceState => ({ ...payload('workspace:get-state'),
   agenticCodingWindowState: { selectedWorkstream: id ? { type: 'session', id } : null } });
 
@@ -39,7 +47,7 @@ function harness(overrides: Partial<StatusDependencies> = {}, workspacePath = '<
     getFocusedSession: vi.fn(async (_path, state) => records.get(selectedSessionId(state) ?? '') ?? null),
     getModels: vi.fn(async () => normalizeModels(payload('ai:getModels'))),
     getDefaultEffortLevel: vi.fn(async () => payload('settings:get-default-effort-level')),
-    getPermissionMode: vi.fn(async () => 'auto'),
+    getWorkspacePolicy: vi.fn(async () => ({ policy: { mode: 'bypass-all', allowAllUsesClassifier: true }, source: 'workspace:get-state' })),
     getGitInfo: vi.fn(async () => ({ repoPath: workspacePath, branch: 'master', dirtyCount: 1 })),
     on: subscribe, onWindowEvent: subscribe,
     registry: createProviderRegistry([{ ...adapterFor('claude-code'), readServedModel: served, account: undefined }]),
@@ -112,6 +120,8 @@ describe('production status lifecycle with audited session/catalog payloads', ()
     const pendingB = h.controller.pollSelection();
     await flush();
     expect(h.latest().readings.session).toBeNull();
+    expect(rendered(h.latest())).toContain('No session');
+    expect(rendered(h.latest())).not.toContain(codex.model!);
     h.select(codex.id);
     const pendingA = h.controller.pollSelection();
     await flush();
@@ -123,6 +133,8 @@ describe('production status lifecycle with audited session/catalog payloads', ()
     await Promise.all([oldA, pendingB]);
     expect(h.latest()).toBe(committed);
     expect(h.latest().readings.model.value?.requestedId).toBe(codex.model);
+    expect(rendered(h.latest())).toContain('GPT-6.1 Sol');
+    expect(rendered(h.latest())).not.toContain(claude.model!);
   });
 
   it('catches a selection change before the first full record resolves', async () => {
@@ -177,6 +189,8 @@ describe('production status lifecycle with audited session/catalog payloads', ()
     await flush();
     expect(h.latest().readings.session?.id).toBe(codex.id);
     expect(h.latest().readings.provider.id).toBe('claude-code');
+    expect(rendered(h.latest())).toContain('Opus 5.5 (1M)');
+    expect(rendered(h.latest())).not.toContain('GPT-6.1 Sol');
     expect(usage.unsubscribers[0]).toHaveBeenCalledTimes(1);
     const count = usage.collect.mock.calls.length;
     usage.callbacks[0].refresh();
@@ -197,10 +211,33 @@ describe('production status lifecycle with audited session/catalog payloads', ()
     h.records.set(claude.id, { ...claude, model: 'claude-code:sonnet' });
     await h.controller.refresh();
     expect(h.latest().readings.servedModel.value).toBeNull();
+    expect(rendered(h.latest())).toContain('>Sonnet<');
+    expect(rendered(h.latest())).not.toContain('Opus 5.5');
     h.records.set(claude.id, { ...claude, provider: 'custom', model: 'custom:new' });
     await h.controller.refresh();
     expect(h.latest().readings.provider.id).toBe('custom');
     expect(h.latest().readings.servedModel.value).toBeNull();
+    expect(rendered(h.latest())).toContain('custom new');
+    expect(rendered(h.latest())).not.toContain('Sonnet');
+  });
+
+  it('never renders a late reply from a previously selected provider', async () => {
+    const pending = deferred<string | null>();
+    const h = harness();
+    await flush();
+    h.served.mockReturnValueOnce(pending.promise);
+    h.select(claude.id);
+    const old = h.controller.pollSelection();
+    await flush();
+    expect(rendered(h.latest())).toContain('Requested model: claude-code:opus-1m');
+    h.select(codex.id);
+    await h.controller.pollSelection();
+    const count = h.updates.length;
+    pending.resolve('claude-sonnet-5');
+    await old;
+    expect(h.updates).toHaveLength(count);
+    expect(rendered(h.latest())).toContain('GPT-6.1 Sol');
+    expect(rendered(h.latest())).not.toContain('claude-sonnet-5');
   });
 
   it('detaches pending session, selection and account work on unmount and clears a lost workspace', async () => {
@@ -268,7 +305,7 @@ describe('production status lifecycle with audited session/catalog payloads', ()
     expect(h.latest().readings.session).toBeNull();
     expect(h.latest().readings.accounts).toEqual([]);
     expect(h.latest().git.branch).toBe('master');
-    expect(h.latest().readings.workspacePolicy.value?.mode).toBe('auto');
+    expect(h.latest().readings.workspacePolicy.value).toEqual({ mode: 'bypass-all', allowAllUsesClassifier: true });
   });
 });
 

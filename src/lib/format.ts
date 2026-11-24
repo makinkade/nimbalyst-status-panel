@@ -75,24 +75,23 @@ export function folderName(path: string): string {
 }
 
 /**
- * Permission mode label. Nimbalyst's workspace modes, mapped onto the same
- * vocabulary the status line uses.
+ * GET-224: workspace policy labels, never a translation to CLI approval modes.
+ * In particular allow-all is not agent-verified bypass. Unknown/legacy values
+ * stay readable without claiming to know a provider's execution semantics.
  */
-export function permissionModeLabel(mode: string): string {
+export function permissionModeLabel(mode: string, classifier?: boolean): string {
   switch (mode) {
     case 'bypass-all':
-    case 'bypassPermissions':
-      return 'Bypass';
+      return classifier === true ? 'Agent-verified' : 'Bypass';
     case 'allow-all':
-    case 'acceptEdits':
-    case 'auto':
-      return 'Auto';
+      return 'Allow all';
     case 'plan':
       return 'Plan';
     case 'ask':
+      return 'Ask';
     case 'default':
       return 'Default';
     default:
-      return titleCase(mode);
+      return mode;
   }
 }

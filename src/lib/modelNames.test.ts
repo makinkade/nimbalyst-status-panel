@@ -92,26 +92,27 @@ describe('modelLabel', () => {
     expect(modelLabel({ sessionModel: 'claude-code:opus', servedModel: 'claude-opus-5-5' })).toBe('Opus 5.5');
   });
 
-  it("ignores a served model from a different family -- the alias just changed", () => {
-    // Switched from Sonnet to Opus; the newest turn on record is still Sonnet's.
+  it('formats a verified past reply independently of the requested family', () => {
+    // The presentation must label this as a past reply; formatting must not
+    // discard real served identity or pretend a mismatching request served it.
     expect(
       modelLabel({
         sessionModel: 'claude-code:opus-1m',
         servedModel: 'claude-sonnet-5',
         catalogName: 'Opus 5.5 (1M)',
       }),
-    ).toBe('Opus 5.5 (1M)');
-    expect(modelLabel({ sessionModel: 'claude-code:opus-1m', servedModel: 'claude-sonnet-5' })).toBe('Opus (1M)');
+    ).toBe('Sonnet 5 (1M)');
+    expect(modelLabel({ sessionModel: 'claude-code:opus-1m', servedModel: 'claude-sonnet-5' })).toBe('Sonnet 5 (1M)');
   });
 
-  it('trusts a pinned alias over everything, since the pin is exact', () => {
+  it('prefers a verified served identity to a requested pin', () => {
     expect(
       modelLabel({
         sessionModel: 'claude-code:opus-4-8',
         servedModel: 'claude-opus-5-5',
         catalogName: 'Opus 4.8',
       }),
-    ).toBe('Opus 4.8');
+    ).toBe('Opus 5.5');
   });
 
   it('falls back to the catalog before the first reply', () => {
@@ -125,14 +126,20 @@ describe('modelLabel', () => {
     expect(modelLabel({ sessionModel: 'claude-code:sonnet' })).toBe('Sonnet');
   });
 
-  it('shows the raw id for a model that is not Claude', () => {
-    expect(modelLabel({ sessionModel: 'openai-codex:gpt-6-astra' })).toBe('openai-codex:gpt-6-astra');
+  it('makes unfamiliar IDs readable without inventing names or versions', () => {
+    expect(modelLabel({ sessionModel: 'openai-codex:gpt-6-astra' })).toBe('openai codex gpt 6 astra');
   });
 
   it('keeps the catalog name for a model it cannot parse', () => {
     expect(
       modelLabel({ sessionModel: 'openai-codex:gpt-6-astra', catalogName: 'GPT-6 Astra' }),
     ).toBe('GPT-6 Astra');
+  });
+
+  it('still formats IDs when the catalog has only repeated the ID as a name', () => {
+    expect(modelLabel({ sessionModel: 'local:Future_V2.7', catalogName: 'local:Future_V2.7' })).toBe('local Future V2.7');
+    expect(modelLabel({ servedModel: 'local:Future_V2.7', servedCatalogName: 'local:Future_V2.7' })).toBe('local Future V2.7');
+    expect(modelLabel({ sessionModel: '___' })).toBe('___');
   });
 
   it('returns null with no session model at all', () => {
