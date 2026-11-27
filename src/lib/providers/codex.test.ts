@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { adapterFor } from '../providerAdapters';
-import { CODEX_USAGE_UNAVAILABLE, codexAccountAdapter, normalizeCodexHost } from './codex';
+import { codexAccountAdapter, createCodexAccountAdapter, newCodexReadBudget, normalizeCodexHost } from './codex';
 
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/status-host-0.83.0.json', import.meta.url), 'utf8')) as {
   observations: Array<{ channel: string; payload: unknown }>;
@@ -148,23 +148,19 @@ describe('Codex normalization (synthetic variations of the audited contract)', (
   });
 });
 
-describe('Codex host compatibility fallback', () => {
-  it('is registered only for Codex, keeps capability unknown, and never probes login or quota IPC', async () => {
-    const invoke = vi.fn();
-    const on = vi.fn();
-    vi.stubGlobal('window', { electronAPI: { invoke, on } });
+describe('Codex host compatibility', () => {
+  it('is registered only for Codex and keeps failed/unknown auth unavailable without reading quota', async () => {
+    const invoke = vi.fn(async () => null);
     const adapter = adapterFor('openai-codex');
     expect(adapter.account).toBe(codexAccountAdapter);
-    expect(adapter.capabilities.accountUsage).toBe('unknown');
+    expect(adapter.capabilities.accountUsage).toBe('supported');
     for (const provider of ['openai', 'openai-compatible', 'custom', 'openai-codex-acp']) {
       expect(adapterFor(provider).account).toBeUndefined();
     }
-    const reading = await codexAccountAdapter.collect(codexAccountAdapter.scope('/workspace'), new AbortController().signal);
-    expect(reading).toMatchObject({ state: 'unavailable', value: null, observedAt: null, reason: CODEX_USAGE_UNAVAILABLE,
+    const collector = createCodexAccountAdapter({ invoke, budget: newCodexReadBudget() });
+    const reading = await collector.collect(collector.scope('/workspace'), new AbortController().signal);
+    expect(reading).toMatchObject({ state: 'unavailable', value: null, observedAt: null,
       scope: { provider: 'openai-codex', accountId: null, association: 'unbound' } });
-    expect(codexAccountAdapter.identity).toBeUndefined();
-    expect(codexAccountAdapter.subscribe).toBeUndefined();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(on).not.toHaveBeenCalled();
+    expect(invoke.mock.calls).toEqual([['openai-codex:check-login']]);
   });
 });

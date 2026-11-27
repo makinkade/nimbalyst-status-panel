@@ -187,6 +187,10 @@ The `.sha256` is emitted alongside for form's sake. Nothing on the GitHub path c
 
 ## Provider capability audit (GET-222, 2026-11-24)
 
+The audit below is historical. GET-226's revised extension-only scope supersedes
+its references to waiting for GET-228, which Mark canceled. See
+"Host-reported Codex allowances" below for the delivered behavior and limits.
+
 This is a data-source audit for [GET-222](https://linear.app/markkinkade/issue/GET-222), not a claim that the panel already implements multi-provider cards. It supplies the contracts for GET-223 through GET-227. No production collector or UI behavior changed during the audit.
 
 ### Evidence and limits
@@ -510,70 +514,119 @@ data; its files live under ignored `build/`. The installed panel was not
 restarted/reloaded, and real account/provider switching, auth/offline failures and
 unobserved plan variants remain runtime checks for GET-227.
 
-## Codex usage foundation (GET-226)
+## Host-reported Codex allowances (GET-226, revised 2026-11-27)
 
-This is the unblocked foundation approved during implementation on 2026-11-27,
-not completed live Codex quota support. GET-228 remains the host prerequisite
-for verified ownership, selected-session association, source observation times,
-auth invalidation and safe responses/events across account changes.
+Mark canceled GET-228 and revised GET-226 to extension-only integration through
+the existing audited channels. Historical audit/foundation references above to
+waiting for a new host contract are superseded. No installed-app patch, new host
+fields or separate Codex client are required. The committed foundation remains
+the basis of the normalizer and cache-scope safeguards.
 
-`providers/codex.ts` normalizes the account-source shape verified in GET-222.
-It accepts unknown input and validates the fields it uses. Bucket IDs/names,
-primary/secondary slots, real durations and host ISO resets are preserved.
-Unknown slots go to Additional limits. IDs are independent of labels, values,
-duration and reset changes; duplicate buckets/windows keep the first valid ID.
-Per-bucket plans, explicit credit flags/balances, reset-credit counts and the
-difference between null and empty reset-credit details survive normalization.
-`limitsAvailable: false` does not discard credit-only responses. Individual
-remaining percentages retain their direction; the host supplies no verified
-unit for the corresponding absolute limit/used quantities, so those are not
-invented as credits, tokens or money. Missing/invalid values do not become zero.
-Errors, malformed envelopes and global session-file/token-only fallbacks are
-rejected. Unrelated fields are omitted; reset-credit details are allowlisted.
+The pure normalizer accepts unknown input, validates the account-source shape
+from GET-222, and preserves bucket identity, labels, actual durations, source
+window roles, resets, per-bucket plans, credits and reset-credit counts/details.
+Unknown slots stay additional; duplicate IDs keep the first valid occurrence.
+Credit-only data is useful even when limitsAvailable is false. Individual
+remaining percentages retain their direction; absolute quantities with unknown
+units are not presented as money, credits or tokens. Missing data is never zero
+or unlimited. Errors, malformed envelopes, globally scanned session-file quota
+and token-only fallbacks are rejected. Reset-credit details are allowlisted.
 
-The pure normalizer returns `AccountUsage`, never a `Reading`. In particular,
-the legacy `lastUpdated` field is processing time and is not copied into
-`observedAt`. Normalizing a real payload establishes neither ownership nor
-freshness. It is tested with the real audited getter, refresh and update
-snapshots, but is intentionally not wired to live collection yet.
+The adapter now checks openai-codex:check-login and explicitly calls
+codex-usage:refresh when Codex is selected. It avoids codex-usage:get, whose
+singleton may be arbitrarily old. Both auth checks and refresh can cold-start
+the existing host-managed nimbalyst-auth app-server via ensureChild; that is an
+intentional integration lifecycle, not a passive read. The extension does not
+spawn a client, read secrets, refresh login tokens explicitly or change login.
 
-The registered `openai-codex` account adapter only returns an explicit unavailable
-reading explaining the ownership/time gap. Account capability remains unknown.
-It has no identity probe, subscription, quota read, refresh, credential access or
-network request. The monitor may re-read this local fallback once a minute;
-there is no Codex service request at mount or on the existing status ticks.
-API OpenAI, custom compatible providers and the deprecated Codex ACP integration
-do not acquire this adapter. Existing groups and stored preferences are unchanged.
+Each monitor owns a private collector. It shares only a timing/pending budget
+with other collectors in the renderer: each channel has a one-minute floor,
+including failures, in-flight calls and selection churn. No unbound values or
+auth detectors cross collector/workspace generations. The account monitor uses
+its independent one-minute timer, never the 1 s selection or 5 s git/status
+loops. A fresh local event can defer the next periodic read. Cache and monitor
+coalescing prevent parallel requests for the same consumer. No persistent
+extension storage is used for Codex data.
 
-Installed Nimbalyst 0.83.0's `CodexAuthServiceImpl.getStatus` and `getRateLimits`
-both call `ensureChild`, which can spawn the host's separate `nimbalyst-auth`
-Codex app-server. `openai-codex:check-login` reaches the first path; explicit
-usage refresh and a cold `codex-usage:get` reach the second. These channels are
-not guaranteed passive snapshots. GET-228 must establish passive-read or an
-explicitly designed host process lifecycle before the panel enables collection.
-Do not patch the installed archive or guess a future bridge schema/channel.
+codex-usage:update is normalized directly after a direct account read in the
+same local generation and only while the auth classification is young. Events
+during reads are ignored; their direct response is handled once. Updates with
+old auth wait for the periodic read rather than initiating a host refresh.
+This prevents refresh/broadcast feedback. Auth-updated/login-completed events
+clear the display/cache immediately; they are invalidation signals, not getter
+payloads. All subscriptions are disposed and late callbacks/results are guarded.
 
-The shared account cache now partitions scope kind and session ID as well as
-provider, account, workspace, config source, association and consumer/auth lease.
-It checks returned session IDs too. An ownership mismatch clears prior cached
-values instead of reviving them as stale; a normal same-scope offline refresh
-can still retain the last successful reading. These are contract safeguards,
-not evidence that the current host supplies a verified Codex identity.
+The getter distinguishes ChatGPT, API-key, signed-out and unknown/error status.
+Only confirmed ChatGPT auth reads subscription quantities. API-key mode is
+unsupported for subscription allowances, signed out requests sign-in, and an
+unknown/failed check clears values. A private email/plan change detector is
+never an account ID, rendered value, log entry or persisted key. Detected
+changes invalidate values before another quota await. Provider/workspace/selection
+boundaries drop local data; a rapid return may display unavailable until the
+request floor allows a new read. Claude collection remains independent.
 
-Deferred until GET-228: runtime auth classification (ChatGPT, API key, signed out,
-expired or unknown), scoped collection/events, request coalescing/throttling for
-the real bridge and real account-switch/error validation. The restarted panel,
-real account/plan variants and process behavior also need verification once
-that integration exists. Claude collection remains independent and unchanged.
+Readings keep accountId null and association unbound. Cards say Host-reported
+Codex, name the unverified account/session association and remain muted. The
+local workspace is a consumer filter, not verified account/workspace ownership.
+observedAt stays null: legacy lastUpdated is processing time, not original
+observation time. lastSuccessfulFetchAt records successful response/event
+receipt; lastAttemptAt records attempts separately. A failed quota read can
+retain the prior explicitly unbound result as stale only in the unchanged local
+auth/configuration generation, retaining its successful fetch time. Unknown auth,
+logout and detected boundaries cannot revive it. Host responses may hide 401,
+429 or offline failures behind session-file fallback, so no precise error or
+sign-out is inferred from an unusable quota response.
 
-Foundation verification (2026-11-27): `npm test` passed **379 tests across 24
-files**. `npx tsc --noEmit`, `npm run build` (30 modules, no build warnings) and
-`git diff --check` passed. New coverage exercises audited Codex payloads,
-synthetic shape/credit/window failures, scope-cache isolation and the production
-controller through mount, polling and provider switches without Codex IPC.
-No restarted-panel/on-screen check, live account switch, forced auth/offline
-failure, package or release was performed. The build does not update the mounted
-extension; live collection remains blocked rather than verified by these tests.
+These guards cannot prove atomic ownership of an untagged host response or
+detect every account/workspace switch. An old or late host broadcast can still
+lack enough identity to attribute it; the UI never upgrades it to verified
+current-account or selected-session quota. Codex allowance is not a universal
+meter for every ChatGPT feature. Generic OpenAI/custom providers remain separate.
+
+Verification uses the audited successful getter/refresh/update shapes and
+explicitly labeled synthetic auth, error, credit, race and switch variants.
+A build/reload alone does not verify the mounted extension. Restarted-panel
+checks and unobserved live plan/account variants must be recorded separately.
+
+Implementation verification (2026-11-27): `npm test` passed **401 tests across
+25 files**. TypeScript checking, the production build (30 modules, no warnings)
+and diff checks passed. The 22 new live-bridge tests use audited auth/refresh/update
+success shapes and synthetic lifecycle/auth/failure cases covering API-key,
+signed-out/unknown auth, denied/offline/401/429, invalid data, file fallback,
+throttling/coalescing, self-broadcasts, generation changes, late work and cleanup.
+
+Mark authorized a Nimbalyst restart. The host kept an old mounted panel even
+after the development reload; reopening the bottom panel was necessary before
+the new cards appeared. A temporary renderer extension then inspected the actual
+visible chips and computed styles, not a synthetic preview. Live authenticated
+Codex showed account-source windows with reset times, Host-reported Codex labels,
+unknown observation time, unbound attribution and a separate successful fetch.
+Muted borders resolved to the host variable in dark and light themes, including
+at the urgency threshold. Selecting an existing Claude session showed its own
+Claude readings; returning to Codex cleared those readings, showed the request
+floor honestly, and resumed Codex quantities on a scheduled read. The original
+selection and system theme were restored. No prompt was sent and no new session
+or account/login change was made.
+
+Process inspection found the existing two Codex app-server children of
+Nimbalyst before and after the runtime check; no additional extension-owned
+process appeared. This verifies reuse in this run, not a cold-start scenario.
+Installed-host source inspection proves both existing calls can start the
+managed auth app-server. Its main-bundle hash still matches GET-222's audit.
+
+The temporary verifier, symlink, observations and generated files were removed;
+no probe storage keys were used. The extension-dev install tool reported success
+for a temporary manifest missing the required panel icon, while renderer
+validation rejected it: always confirm extension_get_status and runtime evidence
+instead of trusting installation success alone. An installed release copy can
+also take precedence over the development symlink at startup; the verified
+development reload/remount is not a packaged-release installation.
+
+Not exercised live: logout/account switching, API-key/signed-out/expired auth,
+forced offline/401/429/denied failures, alternate plans, credit-only/multi-bucket
+accounts and cold auth-process startup. Those variants have synthetic coverage
+where applicable; this is not proof of host atomic account ownership. No package,
+version bump or release was performed.
 
 ## Marketplace readiness (backlog)
 

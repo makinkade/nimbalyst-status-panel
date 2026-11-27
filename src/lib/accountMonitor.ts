@@ -20,7 +20,9 @@ export class AccountMonitor {
   private workspacePath = '';
   private lease = '';
 
-  constructor(private adapter: AccountAdapter, private cache: AccountUsageCache) {}
+  constructor(private adapter: AccountAdapter, private cache: AccountUsageCache) {
+    this.adapter = adapter.create?.() ?? adapter;
+  }
 
   start(workspacePath: string, lease: string, publish: (reading: Reading<AccountUsage>) => void): void {
     this.stop();

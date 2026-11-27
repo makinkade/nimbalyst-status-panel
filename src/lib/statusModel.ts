@@ -23,6 +23,9 @@ export interface ReadingMetadata {
   /** Source observation time, not the time a cached getter returned it. */
   observedAt: number | null;
   fetchedAt: number;
+  /** GET-226: distinguish successful delivery from a failed/throttled attempt. */
+  lastSuccessfulFetchAt?: number | null;
+  lastAttemptAt?: number;
   staleAfterMs?: number;
   reason: string | null;
 }

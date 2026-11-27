@@ -29,7 +29,7 @@ const ICONS: Record<UsageGroupId, string> = {
 };
 
 function providerName(id: string | null): string {
-  return id === 'claude-code' ? 'Claude' : id ?? 'Unknown provider';
+  return id === 'claude-code' ? 'Claude' : id === 'openai-codex' ? 'Host-reported Codex' : id ?? 'Unknown provider';
 }
 
 /** Keep units verbatim in meaning; a credit quantity has no implied currency. */
@@ -64,7 +64,9 @@ function readingNotes(reading: Reading<AccountUsage>, model: StatusModel, stale:
     `Source: ${reading.source}.`, `Scope: ${scope.kind}.`];
   if (scope.accountId) notes.push(`Account: ${scope.accountId}.`);
   else notes.push('Account identity is not reported.');
-  if (scope.workspacePath) notes.push(`Workspace scope: ${scope.workspacePath}.`);
+  if (scope.workspacePath) notes.push(scope.provider === 'openai-codex' && scope.association !== 'verified'
+    ? `Local workspace: ${scope.workspacePath}; account/workspace ownership is unverified.`
+    : `Workspace scope: ${scope.workspacePath}.`);
   if (scope.configSource) notes.push(`Configuration source: ${scope.configSource}.`);
   notes.push(scope.association === 'verified'
     ? 'The source reports a verified scope association.'
@@ -78,6 +80,9 @@ function readingNotes(reading: Reading<AccountUsage>, model: StatusModel, stale:
   if (reading.observedAt !== null && Number.isFinite(reading.observedAt)) {
     notes.push(`Last observed: ${new Date(reading.observedAt).toLocaleString()}.`);
   } else notes.push('Observation time is unknown.');
+  if (reading.lastSuccessfulFetchAt != null) notes.push(
+    `Last successful fetch: ${new Date(reading.lastSuccessfulFetchAt).toLocaleString()}; this is not source observation time.`);
+  if (reading.lastAttemptAt != null) notes.push(`Last attempt: ${new Date(reading.lastAttemptAt).toLocaleString()}.`);
   if (stale) notes.push('STALE — showing the last successful cached reading, not current usage.');
   if (reading.reason) notes.push(reading.reason);
   if (reading.value?.plan) notes.push(`Plan: ${reading.value.plan}.`);

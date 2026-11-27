@@ -1,5 +1,6 @@
 import type { AccountAdapter } from '../providerAdapters';
-import { missing, type AccountUsage, type UsageBucket, type UsageWindow } from '../statusModel';
+import { invokeQuiet, on } from '../ipc';
+import { measured, missing, type AccountUsage, type Reading, type ReadingScope, type UsageBucket, type UsageWindow } from '../statusModel';
 
 type ObjectValue = Record<string, unknown>;
 function object(value: unknown): ObjectValue | null {
@@ -58,10 +59,10 @@ function windows(value: unknown, label: string): UsageWindow[] {
 }
 
 /**
- * GET-226 foundation: normalize only the audited host's account-source payload.
+ * GET-226: normalize only the audited host's account-source payload.
  * This returns quantities, NOT an authenticated Reading. lastUpdated is host
- * processing time and cannot establish ownership or freshness (GET-228).
- * Production collection stays disabled until a real scoped bridge is verified.
+ * processing time and cannot establish ownership or freshness. The revised
+ * scope permits explicitly unbound host-reported quantities with unknown age.
  */
 export function normalizeCodexHost(value: unknown): AccountUsage | null {
   const source = object(value);
@@ -112,20 +113,159 @@ export function normalizeCodexHost(value: unknown): AccountUsage | null {
   return result;
 }
 
-export const CODEX_USAGE_UNAVAILABLE =
-  'Codex allowance is unavailable: this integration cannot verify account ownership or when usage was observed. ' +
-  'Host support is required before account usage can be shown safely.';
+export const CODEX_USAGE_UNBOUND =
+  'Host-reported Codex allowance; account/session association and source observation time are unverified. ' +
+  'This is not a universal ChatGPT allowance or a verified current-account reading.';
+export const CODEX_READ_INTERVAL_MS = 60_000;
+
+export type CodexAuthMode = 'chatgpt' | 'apikey' | 'signed-out' | 'unknown';
+interface AuthStatus { mode: CodexAuthMode; revision: string }
+
+/** A private change detector, never an account ID or a rendered/persisted value. */
+function authStatus(value: unknown): AuthStatus {
+  const status = object(value);
+  let mode: CodexAuthMode = 'unknown';
+  if (status?.installed === true && !status.error) {
+    if (status.isLoggedIn === false) mode = 'signed-out';
+    else if (status.isLoggedIn === true && (status.authMode === 'chatgpt' || status.authMode === 'apikey')) mode = status.authMode;
+  }
+  return { mode, revision: JSON.stringify([mode, text(status?.email) ?? null, text(status?.planType) ?? null]) };
+}
+
+/** Shared timing only: no account data or unbound values cross monitor leases. */
+export interface CodexReadBudget { authAt: number; usageAt: number; authPending: boolean; usagePending: boolean }
+export const newCodexReadBudget = (): CodexReadBudget => ({ authAt: -Infinity, usageAt: -Infinity,
+  authPending: false, usagePending: false });
+const hostBudget = newCodexReadBudget();
+interface CodexDependencies {
+  invoke: (channel: string) => Promise<unknown>;
+  on: (channel: string, callback: (...args: unknown[]) => void) => () => void;
+  now: () => number;
+  budget: CodexReadBudget;
+}
 
 /**
- * No IPC, auth probe, event-driven refresh or credential access here. Even the
- * old cached getter can spawn a host auth app-server on a cache miss. Do not
- * enable that path from a card mount, or guess GET-228's future channel/fields.
+ * The first selected-Codex read checks auth and explicitly refreshes quantities.
+ * Both existing host calls may start its managed auth app-server. Reuse that
+ * lifecycle deliberately; never spawn a client or use the arbitrarily old getter.
+ * Calls have a shared one-minute floor, including failures and selection churn.
+ * Events are consumed locally and never cause another host refresh (GET-226).
  */
+export function createCodexAccountAdapter(overrides: Partial<CodexDependencies> = {}): AccountAdapter {
+  const deps: CodexDependencies = { invoke: invokeQuiet, on, now: Date.now, budget: hostBudget, ...overrides };
+  let epoch = 0;
+  let auth: AuthStatus | null = null;
+  let authAt = -Infinity;
+  let readyForEvents = false;
+  let pendingEvent: { value: unknown; receivedAt: number } | null = null;
+  let last: Reading<AccountUsage> | null = null;
+  let work: Promise<Reading<AccountUsage>> | undefined;
+  let notifyAuth: (() => void) | undefined;
+  const invalidate = () => {
+    epoch += 1; auth = null; authAt = -Infinity; readyForEvents = false;
+    pendingEvent = null; last = null; work = undefined;
+  };
+  const absent = (scope: ReadingScope, reason: string,
+    state: 'unavailable' | 'unauthenticated' | 'unsupported' = 'unavailable'): Reading<AccountUsage> => ({
+    ...missing<AccountUsage>(state, 'codex-host-account', scope, reason, deps.now()),
+    lastSuccessfulFetchAt: null, lastAttemptAt: deps.now(),
+  });
+  const failed = (scope: ReadingScope, reason: string): Reading<AccountUsage> => last?.value
+    ? { ...last, state: 'stale', value: last.value, reason: `${reason} ${CODEX_USAGE_UNBOUND}`,
+      lastAttemptAt: deps.now() }
+    : absent(scope, reason);
+  const receive = (value: unknown, scope: ReadingScope, receivedAt: number): Reading<AccountUsage> => {
+    const usage = normalizeCodexHost(value);
+    if (!usage) return failed(scope, 'Codex account allowance could not be read; the host response was unusable.');
+    last = { ...measured(usage, 'codex-host-account', scope, null, receivedAt, CODEX_READ_INTERVAL_MS),
+      reason: CODEX_USAGE_UNBOUND, lastSuccessfulFetchAt: receivedAt, lastAttemptAt: receivedAt };
+    return last;
+  };
+  const adapter: AccountAdapter = {
+    id: 'openai-codex', intervalMs: CODEX_READ_INTERVAL_MS, retainOnUnavailable: false,
+    scope: (workspacePath) => ({ kind: 'account', provider: 'openai-codex', workspacePath,
+      accountId: null, configSource: 'host-codex-usage', association: 'unbound' }),
+    invalidate,
+    collect(scope, signal) {
+      if (work) return work;
+      const generation = epoch;
+      const valid = () => generation === epoch && !signal.aborted;
+      const collect = async (): Promise<Reading<AccountUsage>> => {
+        if (!valid()) return absent(scope, 'Codex reading cancelled.');
+        const budget = deps.budget;
+        // Event updates are useful only after an explicit account read in this
+        // local epoch. The host cannot guarantee atomic ownership of broadcasts.
+        if (auth?.mode === 'chatgpt' && deps.now() - authAt < CODEX_READ_INTERVAL_MS && pendingEvent) {
+          const update = pendingEvent; pendingEvent = null;
+          return receive(update.value, scope, update.receivedAt);
+        }
+        if (!auth || deps.now() - authAt >= CODEX_READ_INTERVAL_MS) {
+          if (budget.authPending || deps.now() - budget.authAt < CODEX_READ_INTERVAL_MS) {
+            return absent(scope, 'Codex authentication check is throttled; waiting for the next account read.');
+          }
+          readyForEvents = false;
+          budget.authAt = deps.now(); budget.authPending = true;
+          let value: unknown;
+          try { value = await deps.invoke('openai-codex:check-login'); }
+          catch { value = null; }
+          finally { budget.authPending = false; budget.authAt = deps.now(); }
+          if (!valid()) return absent(scope, 'Codex reading cancelled after a scope/auth change.');
+          const next = authStatus(value);
+          if (auth && auth.revision !== next.revision) {
+            // Clear the displayed/cache value at detection, before awaiting any
+            // new quota request. Keep only the just-checked auth classification.
+            notifyAuth?.();
+            last = null; pendingEvent = null; readyForEvents = false;
+          }
+          auth = next; authAt = deps.now();
+          if (!valid()) return absent(scope, 'Codex authentication changed; prior work was cancelled.');
+        }
+        if (auth.mode !== 'chatgpt') {
+          last = null; readyForEvents = false; pendingEvent = null;
+          return auth.mode === 'apikey'
+            ? absent(scope, 'API-key authentication does not report a ChatGPT subscription allowance.', 'unsupported')
+            : auth.mode === 'signed-out' ? absent(scope, 'Sign in to Codex with ChatGPT to read its allowance.', 'unauthenticated')
+              : absent(scope, 'Codex authentication is unknown or could not be checked.');
+        }
+        if (budget.usagePending || deps.now() - budget.usageAt < CODEX_READ_INTERVAL_MS) {
+          return failed(scope, 'Codex allowance refresh is throttled; waiting for the next account read.');
+        }
+        readyForEvents = false;
+        budget.usageAt = deps.now(); budget.usagePending = true;
+        let value: unknown;
+        try { value = await deps.invoke('codex-usage:refresh'); }
+        catch { value = null; }
+        finally { budget.usagePending = false; budget.usageAt = deps.now(); }
+        if (!valid()) return absent(scope, 'Codex reading cancelled after a scope/auth change.');
+        readyForEvents = true;
+        return receive(value, scope, deps.now());
+      };
+      const current = collect().finally(() => { if (work === current) work = undefined; });
+      work = current;
+      return current;
+    },
+    subscribe(refresh, authChanged) {
+      let live = true;
+      notifyAuth = authChanged;
+      const subscriptions = [
+        deps.on('codex-usage:update', (value) => {
+          // Ignore the broadcast caused by our own refresh, including failed
+          // refreshes. Its direct response is consumed once, without a loop.
+          if (!live || !readyForEvents || work || auth?.mode !== 'chatgpt' ||
+            deps.now() - authAt >= CODEX_READ_INTERVAL_MS) return;
+          pendingEvent = { value, receivedAt: deps.now() };
+          refresh();
+        }),
+        ...['openai-codex:auth-updated', 'openai-codex:auth-login-completed'].map((channel) =>
+          deps.on(channel, () => { if (live) authChanged(); })),
+      ];
+      return () => { live = false; notifyAuth = undefined; for (const unsubscribe of subscriptions) unsubscribe(); invalidate(); };
+    },
+  };
+  return adapter;
+}
+
+// Stateful collectors never share unbound quantities between panel instances.
 export const codexAccountAdapter: AccountAdapter = {
-  id: 'openai-codex', intervalMs: 60_000,
-  scope: (workspacePath) => ({ kind: 'account', provider: 'openai-codex', workspacePath,
-    accountId: null, configSource: 'host-codex-usage', association: 'unbound' }),
-  async collect(scope) {
-    return missing('unavailable', 'codex-host-bridge', scope, CODEX_USAGE_UNAVAILABLE);
-  },
+  ...createCodexAccountAdapter(), create: () => createCodexAccountAdapter(),
 };

@@ -215,7 +215,7 @@ describe('scope, states and freshness', () => {
     const data = model(reading(), 'openai-codex');
     const own = usagePresentation(data, undefined, now).usagePrimary.cards[0];
     expect(own).toMatchObject({ value: null, muted: true });
-    expect(own.label).toContain('openai-codex');
+    expect(own.label).toContain('Host-reported Codex');
     const retained = usagePresentation(data, data.accounts[0], now).usagePrimary.cards[0];
     expect(retained).toMatchObject({ value: '42% used', muted: true });
     expect(retained.title).toContain('not this session’s quota');

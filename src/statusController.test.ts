@@ -7,7 +7,7 @@ import { latestServedModel, normalizeModels, selectedSessionId, type SessionReco
 import { adapterFor, createProviderRegistry, type AccountAdapter, type AccountIdentity } from './lib/providerAdapters';
 import { measured, type AccountUsage, type Reading, type ReadingScope } from './lib/statusModel';
 import { normalizeClaudePlan } from './lib/providers/claude';
-import { CODEX_USAGE_UNAVAILABLE } from './lib/providers/codex';
+import { createCodexAccountAdapter, newCodexReadBudget } from './lib/providers/codex';
 import { buildSegments } from './StatusPanel';
 
 const fixture = JSON.parse(readFileSync(new URL('./lib/fixtures/status-host-0.83.0.json', import.meta.url), 'utf8'));
@@ -90,10 +90,11 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(fixture.provena
 afterEach(() => { for (const controller of controllers.splice(0)) controller.stop(); vi.useRealTimers(); });
 
 describe('production status lifecycle with audited session/catalog payloads', () => {
-  it('keeps Codex usage explanatory through mount, polling and provider switches without cold-starting host IPC', async () => {
-    const invoke = vi.fn(async () => payload('codex-usage:get'));
-    const on = vi.fn();
-    vi.stubGlobal('window', { electronAPI: { invoke, on } });
+  it('renders muted live Codex usage through throttled polling and provider switches', async () => {
+    const invoke = vi.fn(async (channel: string) => channel === 'openai-codex:check-login'
+      ? payload(channel) : payload('codex-usage:refresh'));
+    const on = vi.fn(() => () => {});
+    const codexAdapter = createCodexAccountAdapter({ invoke, on, budget: newCodexReadBudget() });
     try {
       const usage = account();
       usage.adapter.id = 'claude-code';
@@ -101,20 +102,25 @@ describe('production status lifecycle with audited session/catalog payloads', ()
         accountId: null, association: 'unbound' });
       usage.collect.mockImplementation(async (scope) => measured(normalizeClaudePlan({ fiveHour: 91 }),
         'synthetic-claude', scope, Date.now(), Date.now(), 300000));
-      const h = harness({ relatedAccounts: [usage.adapter] });
+      const h = harness({ relatedAccounts: [usage.adapter], registry: createProviderRegistry([
+        { ...adapterFor('openai-codex'), account: codexAdapter },
+        { ...adapterFor('claude-code'), account: undefined },
+      ]) });
       await flush();
       await vi.advanceTimersByTimeAsync(120000);
       for (const status of h.updates.filter((status) => status.readings.session?.id === codex.id)) {
         const reading = status.readings.accounts.find((reading) => reading.scope.provider === 'openai-codex');
-        if (reading) expect(reading.value).toBeNull();
+        if (reading?.value) expect(reading).toMatchObject({ state: 'stale', observedAt: null, scope: { association: 'unbound' } });
       }
       const segments = buildSegments(h.latest(), '<workspace>');
       const html = renderToStaticMarkup(createElement(Fragment, null,
         segments.usagePrimary, segments.usageSecondary, segments.usageAdditional));
-      expect(html).toContain(CODEX_USAGE_UNAVAILABLE);
+      expect(html).toContain('Host-reported Codex');
+      expect(html).toContain('20% used');
+      expect(html).toContain('unverified');
       expect(html).toContain('openai-codex');
       expect(html).not.toContain('91%');
-      expect(html).not.toContain('role="img"');
+      expect(html).toContain('role="img"');
       h.select(claude.id);
       await h.controller.pollSelection();
       await flush();
@@ -124,9 +130,15 @@ describe('production status lifecycle with audited session/catalog payloads', ()
       await h.controller.pollSelection();
       await flush();
       expect(h.latest().readings.accounts.find((reading) => reading.scope.provider === 'openai-codex'))
-        .toMatchObject({ state: 'unavailable', value: null, reason: CODEX_USAGE_UNAVAILABLE, observedAt: null });
-      expect(invoke).not.toHaveBeenCalled();
-      expect(on).not.toHaveBeenCalled();
+        .toMatchObject({ state: 'unavailable', value: null, observedAt: null });
+      // Returning to Codex starts a new local epoch. Do not reuse the old
+      // unbound snapshot or defeat the request floor by switching selection.
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(h.latest().readings.accounts.find((reading) => reading.scope.provider === 'openai-codex'))
+        .toMatchObject({ state: 'stale', observedAt: null, scope: { association: 'unbound' } });
+      expect(invoke.mock.calls.filter(([channel]) => channel === 'openai-codex:check-login')).toHaveLength(4);
+      expect(invoke.mock.calls.filter(([channel]) => channel === 'codex-usage:refresh')).toHaveLength(4);
+      expect(on).toHaveBeenCalled();
       h.controller.stop();
       expect(vi.getTimerCount()).toBe(0);
     } finally {

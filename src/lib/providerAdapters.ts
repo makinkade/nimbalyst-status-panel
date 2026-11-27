@@ -19,6 +19,10 @@ export interface AccountIdentity {
 export interface AccountAdapter {
   id: string;
   intervalMs: number;
+  /** Stateful sources get a private collector per monitor/workspace lifecycle. */
+  create?: () => AccountAdapter;
+  /** Some adapters retain only within their own detected auth/config epoch. */
+  retainOnUnavailable?: boolean;
   scope(workspacePath: string): ReadingScope;
   identity?: () => Promise<AccountIdentity>;
   collect: (scope: ReadingScope, signal: AbortSignal) => Promise<Reading<AccountUsage>>;
@@ -43,9 +47,9 @@ export const genericAdapter: ProviderAdapter = { id: 'generic', capabilities: GE
 
 /**
  * Capabilities come from GET-222, not a model-name lookup table. In particular,
- * an API OpenAI model does not confer a ChatGPT subscription allowance. Codex's
- * GET-226 adapter explains the missing host association (GET-228) without
- * probing the legacy bridge or claiming that live collection is supported.
+ * an API OpenAI model does not confer a ChatGPT subscription allowance. Codex
+ * uses the existing host bridge with explicitly unbound, unknown-age readings;
+ * it does not claim the host supplies atomic account ownership (GET-226).
  */
 export function createProviderRegistry(adapters: ProviderAdapter[] = []): Map<string, ProviderAdapter> {
   const known = (id: string, changes: Partial<StatusCapabilities>): ProviderAdapter => ({
@@ -66,7 +70,7 @@ export function createProviderRegistry(adapters: ProviderAdapter[] = []): Map<st
     }],
     ['openai-codex', { ...known('openai-codex', {
       servedModel: 'unsupported', effort: 'supported', context: 'supported', tokens: 'supported',
-      accountUsage: 'unknown',
+      accountUsage: 'supported',
     }), account: codexAccountAdapter, canDefaultEffort: (session) => !!session.model?.startsWith('openai-codex:') &&
       !!session.model.slice('openai-codex:'.length).trim() }],
     ['copilot-cli', known('copilot-cli', {

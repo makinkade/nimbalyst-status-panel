@@ -47,7 +47,7 @@ export class AccountUsageCache {
           current.result = undefined;
           reading = missing('unavailable', adapter.id, scope, 'The reading belongs to a different account scope');
         }
-        if (reading.state === 'unavailable' && current.result?.value) {
+        if (adapter.retainOnUnavailable !== false && reading.state === 'unavailable' && current.result?.value) {
           reading = { ...current.result, state: 'stale', value: current.result.value, reason: reading.reason };
         }
         current.result = reading;
