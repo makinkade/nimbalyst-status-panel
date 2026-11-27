@@ -55,6 +55,8 @@ Real host fixtures cover Claude and Codex. Copilot/Cursor capabilities come from
 
 Usage now follows the selected provider instead of substituting Claude limits beside a Codex, Copilot, Cursor or unknown-provider session. Those integrations show honest unsupported/unavailable states until an account adapter supplies a verified reading. This does not promise a universal ChatGPT quota, API-key allowance or monetary spend inferred from tokens. The presentation supports arbitrary windows, non-model buckets and credit details; that support does not claim a live collector exists for every provider.
 
+Codex usage currently explains that account ownership and observation time cannot be verified. The panel makes no Codex login or quota requests to display that state: the existing host bridge can start a separate auth process and return an unowned cached reading. Live Codex allowance collection requires further host support. Signing into ChatGPT does not yet enable these cards, and the panel does not guess sign-in state, API-key allowances or account limits from session tokens.
+
 Every usage card names its provider. Tooltips identify its source, account/workspace scope when reported, reset and observation time. Claude readings come from the Claude login/config source; association with the selected session's account remains unverified and is stated explicitly. Ambiguous or mismatched scopes do not become a selected-account reading. Any separately displayed foreign account reading remains attributed and muted. With no session selected, the standalone Claude view remains explicitly labeled. Switching sessions clears the old readings while the new selection resolves. Existing segment order and visibility preferences are preserved.
 
 ## Install

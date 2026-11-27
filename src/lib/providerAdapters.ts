@@ -3,6 +3,7 @@ import type { ModelInfo, SessionRecord } from './ipc';
 import { providerIdentity } from './provider';
 import { parseModelId } from './modelNames';
 import { claudeAccountAdapter } from './providers/claude';
+import { codexAccountAdapter } from './providers/codex';
 import {
   measured, missing, type AccountUsage, type Reading, type ReadingScope,
   type StatusCapabilities, type StatusModel, type TokenCounters, type CurrentContext, type ReasoningEffort, type WorkspacePolicy,
@@ -43,7 +44,8 @@ export const genericAdapter: ProviderAdapter = { id: 'generic', capabilities: GE
 /**
  * Capabilities come from GET-222, not a model-name lookup table. In particular,
  * an API OpenAI model does not confer a ChatGPT subscription allowance. Codex's
- * account adapter belongs to GET-226; its missing host association is GET-228.
+ * GET-226 adapter explains the missing host association (GET-228) without
+ * probing the legacy bridge or claiming that live collection is supported.
  */
 export function createProviderRegistry(adapters: ProviderAdapter[] = []): Map<string, ProviderAdapter> {
   const known = (id: string, changes: Partial<StatusCapabilities>): ProviderAdapter => ({
@@ -65,7 +67,7 @@ export function createProviderRegistry(adapters: ProviderAdapter[] = []): Map<st
     ['openai-codex', { ...known('openai-codex', {
       servedModel: 'unsupported', effort: 'supported', context: 'supported', tokens: 'supported',
       accountUsage: 'unknown',
-    }), canDefaultEffort: (session) => !!session.model?.startsWith('openai-codex:') &&
+    }), account: codexAccountAdapter, canDefaultEffort: (session) => !!session.model?.startsWith('openai-codex:') &&
       !!session.model.slice('openai-codex:'.length).trim() }],
     ['copilot-cli', known('copilot-cli', {
       servedModel: 'unsupported', effort: 'unsupported', context: 'unsupported', tokens: 'unsupported',

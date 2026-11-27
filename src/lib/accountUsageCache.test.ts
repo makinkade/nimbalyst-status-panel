@@ -63,6 +63,28 @@ describe('scoped account work (synthetic contract cases)', () => {
     expect(collect).toHaveBeenCalledTimes(2);
   });
 
+  it('partitions session association, scope kind and binding status even in the same auth lease', async () => {
+    const cache = new AccountUsageCache();
+    const { adapter: source, collect } = adapter();
+    for (const scoped of [scope, { ...scope, sessionId: 'one' }, { ...scope, sessionId: 'two' },
+      { ...scope, kind: 'workspace' as const }, { ...scope, association: 'verified' as const }]) {
+      await cache.read(source, scoped, 'same-lease');
+    }
+    expect(collect).toHaveBeenCalledTimes(5);
+  });
+
+  it.each([{ accountId: 'account-B' }, { sessionId: 'other-session' }, { association: 'verified' as const }])(
+    'clears cached values on ownership mismatch instead of retaining them as stale: %j', async (mismatch) => {
+      const cache = new AccountUsageCache();
+      const { adapter: source, collect } = adapter();
+      await cache.read(source, scope, 'epoch-1');
+      collect.mockResolvedValueOnce(sample({ ...scope, ...mismatch }));
+      expect(await cache.read(source, scope, 'epoch-1', true)).toMatchObject({ state: 'unavailable', value: null,
+        reason: 'The reading belongs to a different account scope' });
+      collect.mockRejectedValueOnce(new Error('offline'));
+      expect((await cache.read(source, scope, 'epoch-1', true)).value).toBeNull();
+    });
+
   it('retains only same-scope successful data on a failed refresh and never converts sign-out to stale', async () => {
     const cache = new AccountUsageCache();
     const { adapter: source, collect } = adapter();

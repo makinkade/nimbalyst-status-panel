@@ -510,6 +510,71 @@ data; its files live under ignored `build/`. The installed panel was not
 restarted/reloaded, and real account/provider switching, auth/offline failures and
 unobserved plan variants remain runtime checks for GET-227.
 
+## Codex usage foundation (GET-226)
+
+This is the unblocked foundation approved during implementation on 2026-11-27,
+not completed live Codex quota support. GET-228 remains the host prerequisite
+for verified ownership, selected-session association, source observation times,
+auth invalidation and safe responses/events across account changes.
+
+`providers/codex.ts` normalizes the account-source shape verified in GET-222.
+It accepts unknown input and validates the fields it uses. Bucket IDs/names,
+primary/secondary slots, real durations and host ISO resets are preserved.
+Unknown slots go to Additional limits. IDs are independent of labels, values,
+duration and reset changes; duplicate buckets/windows keep the first valid ID.
+Per-bucket plans, explicit credit flags/balances, reset-credit counts and the
+difference between null and empty reset-credit details survive normalization.
+`limitsAvailable: false` does not discard credit-only responses. Individual
+remaining percentages retain their direction; the host supplies no verified
+unit for the corresponding absolute limit/used quantities, so those are not
+invented as credits, tokens or money. Missing/invalid values do not become zero.
+Errors, malformed envelopes and global session-file/token-only fallbacks are
+rejected. Unrelated fields are omitted; reset-credit details are allowlisted.
+
+The pure normalizer returns `AccountUsage`, never a `Reading`. In particular,
+the legacy `lastUpdated` field is processing time and is not copied into
+`observedAt`. Normalizing a real payload establishes neither ownership nor
+freshness. It is tested with the real audited getter, refresh and update
+snapshots, but is intentionally not wired to live collection yet.
+
+The registered `openai-codex` account adapter only returns an explicit unavailable
+reading explaining the ownership/time gap. Account capability remains unknown.
+It has no identity probe, subscription, quota read, refresh, credential access or
+network request. The monitor may re-read this local fallback once a minute;
+there is no Codex service request at mount or on the existing status ticks.
+API OpenAI, custom compatible providers and the deprecated Codex ACP integration
+do not acquire this adapter. Existing groups and stored preferences are unchanged.
+
+Installed Nimbalyst 0.83.0's `CodexAuthServiceImpl.getStatus` and `getRateLimits`
+both call `ensureChild`, which can spawn the host's separate `nimbalyst-auth`
+Codex app-server. `openai-codex:check-login` reaches the first path; explicit
+usage refresh and a cold `codex-usage:get` reach the second. These channels are
+not guaranteed passive snapshots. GET-228 must establish passive-read or an
+explicitly designed host process lifecycle before the panel enables collection.
+Do not patch the installed archive or guess a future bridge schema/channel.
+
+The shared account cache now partitions scope kind and session ID as well as
+provider, account, workspace, config source, association and consumer/auth lease.
+It checks returned session IDs too. An ownership mismatch clears prior cached
+values instead of reviving them as stale; a normal same-scope offline refresh
+can still retain the last successful reading. These are contract safeguards,
+not evidence that the current host supplies a verified Codex identity.
+
+Deferred until GET-228: runtime auth classification (ChatGPT, API key, signed out,
+expired or unknown), scoped collection/events, request coalescing/throttling for
+the real bridge and real account-switch/error validation. The restarted panel,
+real account/plan variants and process behavior also need verification once
+that integration exists. Claude collection remains independent and unchanged.
+
+Foundation verification (2026-11-27): `npm test` passed **379 tests across 24
+files**. `npx tsc --noEmit`, `npm run build` (30 modules, no build warnings) and
+`git diff --check` passed. New coverage exercises audited Codex payloads,
+synthetic shape/credit/window failures, scope-cache isolation and the production
+controller through mount, polling and provider switches without Codex IPC.
+No restarted-panel/on-screen check, live account switch, forced auth/offline
+failure, package or release was performed. The build does not update the mounted
+extension; live collection remains blocked rather than verified by these tests.
+
 ## Marketplace readiness (backlog)
 
 Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 built-ins plus Astro, Electronics Studio, Jupyter, Mindmap, Namenym, Replicad and Slides, none of which surface session state. Publishing would mean closing these gaps, all of which exist because this was built for one machine:

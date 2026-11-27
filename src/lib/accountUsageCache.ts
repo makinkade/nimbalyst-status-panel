@@ -21,7 +21,8 @@ export class AccountUsageCache {
 
   read(adapter: AccountAdapter, scope: ReadingScope, lease: string, force = false): Promise<Reading<AccountUsage>> {
     const key = JSON.stringify([adapter.id, scope.provider, scope.accountId ?? null,
-      scope.workspacePath, scope.configSource ?? null, scope.association ?? 'unbound', lease]);
+      scope.kind, scope.workspacePath, scope.sessionId ?? null,
+      scope.configSource ?? null, scope.association ?? 'unbound', lease]);
     let entry = this.entries.get(key);
     if (entry?.work) return entry.work;
     if (!force && entry?.result && entry.finishedAt !== undefined &&
@@ -39,8 +40,11 @@ export class AccountUsageCache {
           return missing<AccountUsage>('unavailable', adapter.id, scope, 'Reading cancelled');
         }
         if (reading.scope.kind !== scope.kind || reading.scope.provider !== scope.provider || reading.scope.workspacePath !== scope.workspacePath ||
-          (reading.scope.accountId ?? null) !== (scope.accountId ?? null) ||
+          (reading.scope.accountId ?? null) !== (scope.accountId ?? null) || reading.scope.sessionId !== scope.sessionId ||
           reading.scope.configSource !== scope.configSource || reading.scope.association !== scope.association) {
+          // GET-226: a scope mismatch is an ownership failure, not an offline
+          // refresh. Do not revive cached values while association is uncertain.
+          current.result = undefined;
           reading = missing('unavailable', adapter.id, scope, 'The reading belongs to a different account scope');
         }
         if (reading.state === 'unavailable' && current.result?.value) {

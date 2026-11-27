@@ -7,6 +7,7 @@ import { latestServedModel, normalizeModels, selectedSessionId, type SessionReco
 import { adapterFor, createProviderRegistry, type AccountAdapter, type AccountIdentity } from './lib/providerAdapters';
 import { measured, type AccountUsage, type Reading, type ReadingScope } from './lib/statusModel';
 import { normalizeClaudePlan } from './lib/providers/claude';
+import { CODEX_USAGE_UNAVAILABLE } from './lib/providers/codex';
 import { buildSegments } from './StatusPanel';
 
 const fixture = JSON.parse(readFileSync(new URL('./lib/fixtures/status-host-0.83.0.json', import.meta.url), 'utf8'));
@@ -89,6 +90,50 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(fixture.provena
 afterEach(() => { for (const controller of controllers.splice(0)) controller.stop(); vi.useRealTimers(); });
 
 describe('production status lifecycle with audited session/catalog payloads', () => {
+  it('keeps Codex usage explanatory through mount, polling and provider switches without cold-starting host IPC', async () => {
+    const invoke = vi.fn(async () => payload('codex-usage:get'));
+    const on = vi.fn();
+    vi.stubGlobal('window', { electronAPI: { invoke, on } });
+    try {
+      const usage = account();
+      usage.adapter.id = 'claude-code';
+      usage.adapter.scope = (workspacePath) => ({ kind: 'account', provider: 'claude-code', workspacePath,
+        accountId: null, association: 'unbound' });
+      usage.collect.mockImplementation(async (scope) => measured(normalizeClaudePlan({ fiveHour: 91 }),
+        'synthetic-claude', scope, Date.now(), Date.now(), 300000));
+      const h = harness({ relatedAccounts: [usage.adapter] });
+      await flush();
+      await vi.advanceTimersByTimeAsync(120000);
+      for (const status of h.updates.filter((status) => status.readings.session?.id === codex.id)) {
+        const reading = status.readings.accounts.find((reading) => reading.scope.provider === 'openai-codex');
+        if (reading) expect(reading.value).toBeNull();
+      }
+      const segments = buildSegments(h.latest(), '<workspace>');
+      const html = renderToStaticMarkup(createElement(Fragment, null,
+        segments.usagePrimary, segments.usageSecondary, segments.usageAdditional));
+      expect(html).toContain(CODEX_USAGE_UNAVAILABLE);
+      expect(html).toContain('openai-codex');
+      expect(html).not.toContain('91%');
+      expect(html).not.toContain('role="img"');
+      h.select(claude.id);
+      await h.controller.pollSelection();
+      await flush();
+      expect(h.latest().readings.accounts.find((reading) => reading.scope.provider === 'claude-code')?.value).not.toBeNull();
+      expect(h.latest().readings.accounts.some((reading) => reading.scope.provider === 'openai-codex')).toBe(false);
+      h.select(codex.id);
+      await h.controller.pollSelection();
+      await flush();
+      expect(h.latest().readings.accounts.find((reading) => reading.scope.provider === 'openai-codex'))
+        .toMatchObject({ state: 'unavailable', value: null, reason: CODEX_USAGE_UNAVAILABLE, observedAt: null });
+      expect(invoke).not.toHaveBeenCalled();
+      expect(on).not.toHaveBeenCalled();
+      h.controller.stop();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('renders selected-provider groups without flashing retained or late Claude quota', async () => {
     const usage = account();
     usage.adapter.id = 'claude-code';
@@ -168,6 +213,7 @@ describe('production status lifecycle with audited session/catalog payloads', ()
     await flush();
     nextA.resolve(codex);
     await pendingA;
+    await flush(); // The independent Codex fallback can publish after common status.
     const committed = h.latest();
     b.resolve(claude);
     firstA.resolve({ ...codex, model: 'obsolete:model' });
@@ -273,6 +319,7 @@ describe('production status lifecycle with audited session/catalog payloads', ()
     expect(rendered(h.latest())).toContain('Requested model: claude-code:opus-1m');
     h.select(codex.id);
     await h.controller.pollSelection();
+    await flush(); // Settle the selected adapter before testing the old transcript.
     const count = h.updates.length;
     pending.resolve('claude-sonnet-5');
     await old;
