@@ -6,6 +6,7 @@ interface ChipProps {
   accent: string;
   children: ReactNode;
   title?: string;
+  className?: string;
 }
 
 /**
@@ -13,9 +14,9 @@ interface ChipProps {
  * segment background in the terminal; the chip itself stays on the app's
  * surface colors so it themes with Nimbalyst.
  */
-export function Chip({ icon, accent, children, title }: ChipProps) {
+export function Chip({ icon, accent, children, title, className }: ChipProps) {
   return (
-    <div className="sp-chip" style={{ borderColor: accent }} title={title}>
+    <div className={`sp-chip${className ? ` ${className}` : ''}`} style={{ borderColor: accent }} title={title}>
       <span className="material-symbols-outlined sp-chip-icon" style={{ color: accent }}>
         {icon}
       </span>
@@ -27,13 +28,14 @@ export function Chip({ icon, accent, children, title }: ChipProps) {
 interface BarProps {
   percent: number;
   color: string;
+  label?: string;
 }
 
 /** The 10-cell block bar, rendered as elements rather than U+2588/U+2591. */
-export function Bar({ percent, color }: BarProps) {
+export function Bar({ percent, color, label }: BarProps) {
   const filled = barFill(percent);
   return (
-    <span className="sp-bar" role="img" aria-label={`${Math.round(percent)} percent`}>
+    <span className="sp-bar" role="img" aria-label={label ?? `${Math.round(percent)} percent`}>
       {Array.from({ length: BAR_LENGTH }, (_, index) => (
         <span
           key={index}

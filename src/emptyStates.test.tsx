@@ -56,7 +56,7 @@ describe('the strip with nothing behind it', () => {
   });
 
   it('leaves no segment empty, so none can be mistaken for one hidden', () => {
-    // The whole point of the pass: `usage5h` and `usage7d` were the two that
+    // The whole point of the pass: `usagePrimary` and `usageSecondary` were the two that
     // returned null here, and they were the only two.
     for (const id of SEGMENT_IDS) {
       expect(render(id, emptyStatus()), `segment "${id}" rendered nothing`).not.toBe('');
@@ -103,20 +103,20 @@ describe('a workspace with no folder path at all', () => {
 });
 
 describe('the usage windows with no reading behind them', () => {
-  it('holds the 5h and 7d segments open with a placeholder', () => {
-    expect(render('usage5h', emptyStatus())).toContain('5h —');
-    expect(render('usage7d', emptyStatus())).toContain('7d —');
+  it('holds the primary and secondary groups open with a placeholder', () => {
+    expect(render('usagePrimary', emptyStatus())).toContain('Primary usage —');
+    expect(render('usageSecondary', emptyStatus())).toContain('Secondary usage —');
   });
 
-  it('names the denied-permission case, which is indistinguishable from here', () => {
-    // A denied `permissions.filesystem` means no credentials file, so no token,
-    // so no plan reading -- and the tooltip is the only place that can say so.
-    const html = render('usage5h', emptyStatus());
-    expect(html).toContain('filesystem permission may be unavailable');
+  it('explains a missing reading without guessing credentials or permission state', () => {
+    // A denied file permission and an absent adapter cannot be diagnosed from
+    // a missing reading alone. The production adapter supplies specific reasons.
+    const html = render('usagePrimary', emptyStatus());
+    expect(html).toContain('No account usage adapter or reading');
   });
 
   it('reports unavailable host usage without rendering raw host errors', () => {
-    const html = render('usage5h', emptyStatus({ usage: { error: 'not logged in' } }));
+    const html = render('usagePrimary', emptyStatus({ usage: { error: 'not logged in' } }));
     expect(html).toContain('Claude usage is unavailable from the host');
   });
 
@@ -124,19 +124,19 @@ describe('the usage windows with no reading behind them', () => {
     // The endpoint answered; this particular window was not in the answer. That
     // is not an outage and should not be described as one.
     const html = render(
-      'usage7d',
+      'usageSecondary',
       emptyStatus({ planUsage: { timestamp: new Date().toISOString(), fiveHour: 12 } }),
     );
-    expect(html).toContain('carried no 7d window');
+    expect(html).toContain('No applicable secondary window');
     expect(html).not.toContain('unreachable');
   });
 
   it('still renders the real bar when there is a reading', () => {
     const html = render(
-      'usage5h',
+      'usagePrimary',
       emptyStatus({ planUsage: { timestamp: new Date().toISOString(), fiveHour: 42 } }),
     );
     expect(html).toContain('42%');
-    expect(html).not.toContain('5h —');
+    expect(html).not.toContain('Primary usage —');
   });
 });

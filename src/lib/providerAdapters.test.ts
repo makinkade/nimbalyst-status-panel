@@ -5,7 +5,7 @@ import { providerIdentity } from './provider';
 import { adapterFor, createProviderRegistry, genericAdapter, normalizeSessionStatus, selectedAccountUsage } from './providerAdapters';
 import { ageReading, measured, type AccountUsage, type ReadingScope } from './statusModel';
 import { claudeReading, normalizeClaudePlan } from './providers/claude';
-import { fixedClaudeUsage } from './statusPresentation';
+import { usagePresentation } from './usagePresentation';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/status-host-0.83.0.json', import.meta.url), 'utf8'));
 const payload = (channel: string, index = 0) => fixture.observations.filter((row: { channel: string }) => row.channel === channel)[index].payload;
@@ -160,10 +160,11 @@ describe('Claude normalized allowance collection', () => {
     expect(measured({ buckets: [] }, 'source', scope, Number.NaN, now, 60000)).toMatchObject({ state: 'stale', observedAt: null });
   });
 
-  it('qualifies an unknown selected provider and keeps the owner unbound', () => {
+  it('does not substitute Claude usage for an unknown provider and keeps the owner unbound', () => {
     const data = status({ id: 'x', model: 'unfamiliar' });
     data.accounts = [claudeReading({ timestamp: new Date().toISOString(), fiveHour: 91 }, scope, 'claude-direct')];
-    expect(fixedClaudeUsage(data).fiveHour).toMatchObject({ percent: 91, foreign: 'unknown provider' });
+    expect(usagePresentation(data).usagePrimary.cards[0]).toMatchObject({ percent: null, muted: true });
+    expect(usagePresentation(data, data.accounts[0]).usagePrimary.cards[0]).toMatchObject({ percent: 91, muted: true });
     expect(data.accounts[0].scope.accountId).toBeNull();
     expect(data.accounts[0].scope.association).toBe('unbound');
   });

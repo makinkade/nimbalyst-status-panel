@@ -2,7 +2,7 @@
   "id": "com.mkinkade.status-panel",
   "name": "Status Panel",
   "version": "0.1.7",
-  "description": "Selected-session model, configured effort, workspace policy, git, context and token counters, with separate Claude plan limits",
+  "description": "Selected-session model, effort, workspace policy, git, context and provider-aware usage groups",
   "author": "Mark Kinkade",
   "main": "dist/index.js",
   "styles": "dist/index.css",
@@ -21,14 +21,14 @@
       "tokens"
     ],
     "icon": "monitoring",
-    "tagline": "Session status for any model, with Claude plan limits",
-    "longDescription": "A chip strip in Nimbalyst's bottom panel describes the focused session across Claude Code, ChatGPT/Codex, Copilot, Cursor and custom providers. Model names use supplied catalog names or readable IDs, with exact requested and last-observed served identities in the tooltip. Claude reply versions are parsed without a version table; a disagreeing or stale identity says Last reply. Configured effort distinguishes session settings from applicable defaults. Unknown or unsupported readings explain what is missing.\n\nWorkspace policy keeps Ask, Allow all, Bypass and Agent-verified distinct from provider approval, sandbox, filesystem and network restrictions. Effective session restrictions remain explicitly unavailable on the current host. Directory, branch and uncommitted-file count work independently of model support. Current context uses reported occupancy and capacity, including a valid zero. Available input/output or total counters stay visible without a percentage; tooltips separate cumulative, cache and reasoning counts without turning absent values into zero.\n\nThe plan chips report Claude allowances only: 5-hour, 7-day and model-scoped caps such as 7d Fable. Beside another or unknown provider they relabel to Claude 5h / Claude 7d and render muted. These readings come from the Claude login/config source; association with the selected session's account is unverified. No other provider's quota is reported. Real fixtures cover Claude and Codex; Copilot/Cursor capabilities are source-verified, and custom/future cases have automated fallback coverage. The gear picks visible chips and their order, remembered across workspaces.",
+    "tagline": "Session status with provider-aware usage and honest missing states",
+    "longDescription": "A chip strip in Nimbalyst's bottom panel describes the focused session across Claude Code, ChatGPT/Codex, Copilot, Cursor and custom providers. Model names use supplied catalog names or readable IDs, with exact requested and last-observed served identities in the tooltip. Claude reply versions are parsed without a version table; a disagreeing or stale identity says Last reply. Configured effort distinguishes session settings from applicable defaults. Unknown or unsupported readings explain what is missing.\n\nWorkspace policy keeps Ask, Allow all, Bypass and Agent-verified distinct from provider approval, sandbox, filesystem and network restrictions. Effective session restrictions remain explicitly unavailable on the current host. Directory, branch and uncommitted-file count work independently of model support. Current context uses reported occupancy and capacity, including a valid zero. Available input/output or total counters stay visible without a percentage; tooltips separate cumulative, cache and reasoning counts without turning absent values into zero.\n\nUsage follows the selected provider through three stable groups: primary window, secondary window, and additional limits/credits. Cards retain actual labels, durations, units and resets, including non-model buckets. Percentages show used; credit balances and raw quantities have no invented percentage or monetary spend. Missing reporting, sign-in required, unavailable readings and absent windows stay visible with an explanation. Cached readings retain their observation time and render muted.\n\nClaude plan collection is available today. Codex and other provider quota collectors remain separate integrations; no universal ChatGPT or API-key allowance is inferred. Each card names its provider and explains source and account/workspace scope. Claude login/config-source usage is not verified as the selected session’s account. Ambiguous scopes are not silently assigned. With no selected session, a standalone Claude account view remains explicitly labeled.\n\nThe gear controls visibility and order across workspaces. Existing 5h, 7d and scoped-limit preferences migrate to the three groups at their saved positions, retaining hidden choices and behavior settings. New bucket IDs do not create orphaned controls. Real fixtures cover Claude and Codex common status; broader live provider and account validation remains separate.",
     "highlights": [
       "Requested and last-observed served model identity, with catalog names and readable future IDs",
       "Configured effort with labeled defaults, and workspace policy separate from session restrictions",
       "Reported current context, plus separate cumulative, cache and reasoning token counters",
       "Directory, git branch and dirty-file count independent of provider support",
-      "Claude plan limits, relabelled and muted beside another provider",
+      "Provider-aware usage groups with explicit scope, units, freshness and missing states",
       "Gear chip for segment visibility/order, plus Ctrl+Shift+S access"
     ],
     "repositoryUrl": "https://github.com/makinkade/nimbalyst-status-panel",
@@ -59,7 +59,7 @@
         "placement": "bottom",
         "activationEvents": ["onStartup"],
         "order": 70,
-        "tooltip": "Model, effort, permission mode, working directory, branch, context usage and plan limits for the active session."
+        "tooltip": "Model, configured effort, workspace policy, directory, branch, context and provider-aware usage for the selected session."
       }
     ]
   }

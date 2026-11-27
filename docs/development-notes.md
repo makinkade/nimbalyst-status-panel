@@ -42,7 +42,9 @@ src/
   lib/providers/claude.ts # Claude account adapter and direct/host normalization
   lib/accountMonitor.ts # adapter subscriptions, auth epochs and 60s Claude cadence
   lib/accountUsageCache.ts # scoped, memory-only cache and shared requests
-  lib/statusPresentation.ts # common card labels/tooltips and fixed usage projection
+  lib/statusPresentation.ts # common session-card labels/tooltips
+  lib/usagePresentation.ts # scoped account cards, units, freshness and stable usage groups
+  components/UsageChip.tsx # percentage or quantity-only usage card
   components/Chip.tsx      # Chip + Bar
   components/ConfigChip.tsx # gear chip + segment picker popover
   segments.ts         # segment registry, default order, config reconciliation
@@ -423,6 +425,90 @@ cases are labeled separately. Controller coverage also checks rendered output
 after selection/model/provider boundaries and late replies. These checks do not
 substitute for a restarted-panel check, real switching, compaction/resume or
 live Copilot/Cursor/custom execution; those remain GET-227 validation work.
+
+## Provider-aware usage groups (GET-225)
+
+The usage presentation now consumes the optional bucket/window collection rather
+than the temporary fixed-Claude projection described in GET-223. The default
+view follows the selected provider. An unsupported integration, unknown provider
+or missing adapter keeps visible explanatory cards; Claude is never substituted
+as another provider's allowance. With no resolved session, the separate Claude
+account view remains explicitly attributed. Production quota collection is still
+Claude-only; GET-226 owns Codex collection and GET-228 owns its verified host
+ownership/observation contract. Rendering synthetic future-provider windows or
+credits is not evidence that their live collection works.
+
+`UsageWindow.role` is an optional adapter-supplied presentation hint: primary,
+secondary or additional. Claude assigns primary to its five-hour plan window and
+secondary to its seven-day plan window, including limits-array-only sources.
+Model caps and unfamiliar windows stay additional. The renderer does not infer
+roles from duration, model names or source array positions. Any group can hold
+multiple cards. Repeated bucket IDs are merged and repeated window IDs are
+deduplicated within a bucket; React keys include scope, bucket/window identity
+and card kind. Changing labels, values or resets cannot change identity.
+
+The three global controls are `usagePrimary`, `usageSecondary` and
+`usageAdditional`. Their settings labels describe live contents, but stored
+preferences never depend on transient bucket/account IDs. Version 2 of the same
+`segments` storage value maps legacy `usage5h`, `usage7d` and `usageScoped` to
+those groups, respectively. Mapping happens before filtering/deduplication, keeps
+the first occurrence's exact position among other cards, and maps hidden states
+too. Non-usage IDs, `autoOpen` and `checkForUpdates` remain unchanged. This also
+preserves `index.ts`'s independent read of `segments.autoOpen`. Migration is
+idempotent and tolerates mixed/duplicate/malformed arrays. Mount and hydration
+normalize in memory without writing defaults; the next explicit settings edit
+saves the normalized version. Reset intentionally restores the new defaults.
+An older extension will not understand v2 group IDs; preserving downgrade edits
+is not a supported migration direction.
+
+`selectedAccountUsage` refuses multiple applicable accounts/sources and
+workspace/session scope mismatches instead of selecting the first provider
+match. A provider match alone never proves account association. Every card names
+its provider; tooltips retain the source, account ID and workspace/config scope
+when supplied, and explicitly identify unbound login/config-source readings.
+The existing Claude reader and shared-cache contract are unchanged. An explicitly
+retained foreign-provider/scope presentation stays attributed and muted; it is
+not used to fill the default selected-provider groups.
+
+Bars consistently mean percentage used. A reported remaining percentage is
+converted, with the source value/direction in the tooltip. Measured zero is valid;
+missing/invalid quantities never mean zero or unlimited. Used percentages above
+100 remain visible while bar geometry is clamped. Claude's 50/80 thresholds and
+Night Owl palette are unchanged. Credit quantities, explicit balances, credit
+availability/unlimited flags and reset-credit counts render without made-up
+percentage bars or urgency colors. Currency, monetary spend and universal
+ChatGPT allowances are never derived from tokens. Plans and credit details appear
+only when supplied by the normalized source.
+
+Available readings without a particular role show a no-applicable-window state;
+unsupported, unauthenticated and unavailable readings retain their own reasons.
+Empty buckets explain that no usable window/credits were supplied. Reset times
+and countdowns use the existing local formatting helpers; absent or invalid
+resets are explained rather than invented. Aging uses the successful source
+observation time, never the time a cached getter returns. Unknown/future source
+times and failed refreshes are muted and explained, retaining safe prior values.
+Quantity-only cards use the theme foreground; missing/stale/foreign cards use
+`var(--nim-text-muted)`. Provider/bucket labels and gear rows wrap at narrow widths.
+
+Regression coverage includes audited Claude host payloads and clearly labeled
+synthetic arbitrary-window/credit/provider cases, legacy preference migration and
+hydration, scope ambiguity, units, freshness and production-controller selection
+switches with late quota results. The earlier always-Claude behavior described
+in historical audit/checklist sections is superseded here. The mounted extension
+still requires a Nimbalyst restart to run a rebuilt bundle; preview/automated
+checks do not constitute restarted-panel or real-provider/account verification.
+
+Implementation verification (2026-11-24): `npm test` passed **340 tests across
+23 files**; `npx tsc --noEmit`, `npm run build` (29 modules, no warnings) and
+`git diff --check` passed. An isolated browser preview using the real components
+and synthetic readings checked Claude, missing Codex usage, credits, arbitrary
+long labels, sign-in required and stale states in both themes. It also checked
+360px wrapping, hydration with no automatic writes, migrated order/visibility,
+explicit persistence, gear scrolling, Reset and Escape dismissal. No browser
+errors were observed. This preview uses an empty test profile and no real account
+data; its files live under ignored `build/`. The installed panel was not
+restarted/reloaded, and real account/provider switching, auth/offline failures and
+unobserved plan variants remain runtime checks for GET-227.
 
 ## Marketplace readiness (backlog)
 

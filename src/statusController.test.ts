@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StatusController, type Status, type StatusDependencies } from './statusController';
 import { latestServedModel, normalizeModels, selectedSessionId, type SessionRecord, type WorkspaceState } from './lib/ipc';
 import { adapterFor, createProviderRegistry, type AccountAdapter, type AccountIdentity } from './lib/providerAdapters';
-import { measured, type AccountUsage, type ReadingScope } from './lib/statusModel';
+import { measured, type AccountUsage, type Reading, type ReadingScope } from './lib/statusModel';
+import { normalizeClaudePlan } from './lib/providers/claude';
 import { buildSegments } from './StatusPanel';
 
 const fixture = JSON.parse(readFileSync(new URL('./lib/fixtures/status-host-0.83.0.json', import.meta.url), 'utf8'));
@@ -88,6 +89,46 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(fixture.provena
 afterEach(() => { for (const controller of controllers.splice(0)) controller.stop(); vi.useRealTimers(); });
 
 describe('production status lifecycle with audited session/catalog payloads', () => {
+  it('renders selected-provider groups without flashing retained or late Claude quota', async () => {
+    const usage = account();
+    usage.adapter.id = 'claude-code';
+    usage.adapter.scope = (workspacePath) => ({ kind: 'account', provider: 'claude-code', workspacePath,
+      accountId: null, association: 'unbound' });
+    usage.collect.mockImplementation(async (scope) => measured(normalizeClaudePlan({ fiveHour: 91 }),
+      'synthetic-claude', scope, Date.now(), Date.now(), 300000));
+    const h = harness({ relatedAccounts: [usage.adapter] });
+    const renderUsage = (status: Status) => {
+      const segments = buildSegments(status, status.workspacePath);
+      return ['usagePrimary', 'usageSecondary', 'usageAdditional'].map((id) =>
+        renderToStaticMarkup(createElement(Fragment, null, segments[id as keyof typeof segments]))).join('');
+    };
+    await flush();
+    expect(renderUsage(h.latest())).not.toContain('91%');
+    h.select(claude.id);
+    await h.controller.pollSelection();
+    await flush();
+    expect(renderUsage(h.latest())).toContain('Claude 5h');
+    expect(renderUsage(h.latest())).toContain('91% used');
+    const late = deferred<Reading<AccountUsage>>();
+    usage.collect.mockReturnValueOnce(late.promise);
+    usage.callbacks[usage.callbacks.length - 1].refresh();
+    await flush();
+    const switchedAt = h.updates.length;
+    h.select(codex.id);
+    await h.controller.pollSelection();
+    await flush();
+    late.resolve(measured(normalizeClaudePlan({ fiveHour: 99 }), 'late-Claude', usage.adapter.scope('<workspace>'),
+      Date.now(), Date.now(), 300000));
+    await flush();
+    for (const state of h.updates.slice(switchedAt)) {
+      expect(renderUsage(state)).not.toContain('91%');
+      expect(renderUsage(state)).not.toContain('99%');
+    }
+    expect(renderUsage(h.latest())).toContain('openai-codex');
+    expect(renderUsage(h.latest())).toContain('unavailable');
+    expect(usage.unsubscribers[0]).toHaveBeenCalled();
+  });
+
   it('preserves the 1 s selection poll and 5 s full refresh with no per-tick quota request', async () => {
     const usage = account();
     const h = harness({ relatedAccounts: [usage.adapter] });

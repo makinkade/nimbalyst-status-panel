@@ -166,11 +166,26 @@ export function normalizeSessionStatus(input: SessionInputs, registry = provider
   };
 }
 
-/** GET-225 replaces this compatibility view with configurable usage groups. */
+/**
+ * GET-225: a provider match is not an account binding. Refuse ambiguous scopes
+ * instead of depending on the order in which independent collectors finish.
+ * With no selected session the standalone Claude account remains explicit.
+ */
 export function selectedAccountUsage(model: StatusModel): Reading<AccountUsage> {
-  return model.accounts.find((entry) => entry.scope.provider === model.provider.id) ??
-    missing(model.capabilities.accountUsage === 'unsupported' ? 'unsupported' : 'unavailable',
-      'provider-adapter', { kind: 'account', provider: model.provider.id,
-        workspacePath: model.model.scope.workspacePath, accountId: null, association: 'unbound' },
-      'No account usage adapter is available for this provider');
+  const provider = model.session ? model.provider.id : 'claude-code';
+  const workspacePath = model.model.scope.workspacePath;
+  const matches = provider ? model.accounts.filter(({ scope }) => scope.provider === provider) : [];
+  const applicable = matches.filter(({ scope }) =>
+    scope.kind !== 'session' &&
+    (!scope.workspacePath || scope.workspacePath === workspacePath) &&
+    (!scope.sessionId || scope.sessionId === model.session?.id));
+  if (applicable.length === 1) return applicable[0];
+  const unsupported = !!model.session && provider !== null && model.capabilities.accountUsage === 'unsupported';
+  return missing(unsupported && !matches.length ? 'unsupported' : 'unavailable',
+    'provider-adapter', { kind: 'account', provider, workspacePath, accountId: null, association: 'unbound' },
+    applicable.length > 1 ? 'Account usage is ambiguous: more than one account/source scope applies.'
+      : matches.length ? 'Account usage belongs to a different workspace or session scope.'
+        : !provider ? 'The selected session’s provider is unknown; its allowance cannot be identified.'
+          : unsupported ? `Usage reporting is unsupported for ${provider}. No quota API is available through this integration.`
+            : `No account usage adapter or reading is available for ${provider}.`);
 }

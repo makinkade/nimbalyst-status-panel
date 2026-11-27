@@ -41,6 +41,22 @@
   color: var(--nim-text-muted);
 }
 
+/* GET-225: provider labels and unfamiliar bucket names can be arbitrarily long. */
+.sp-usage-chip {
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: normal;
+}
+
+.sp-usage-chip .sp-chip-body {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.sp-usage-chip .sp-label {
+  overflow-wrap: anywhere;
+}
+
 .sp-value {
   font-variant-numeric: tabular-nums;
 }
@@ -154,6 +170,17 @@
   gap: 6px;
   cursor: pointer;
   font-size: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.sp-popover-label > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sp-popover-label input {
+  flex: none;
 }
 
 .sp-popover-muted {
@@ -164,6 +191,7 @@
 .sp-popover-actions {
   display: inline-flex;
   gap: 2px;
+  flex: none;
 }
 
 .sp-popover-actions button {

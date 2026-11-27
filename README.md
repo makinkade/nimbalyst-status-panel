@@ -2,7 +2,7 @@
 
 *A Nimbalyst bottom panel showing model, context usage and plan limits for the session you are talking to.*
 
-Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the focused Agent session: its requested model and last observed reply, configured reasoning effort, workspace policy, working folder and git branch, current context and token counters. Available readings update as the session runs. Separate plan chips report your Claude allowance.
+Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the focused Agent session: its requested model and last observed reply, configured reasoning effort, workspace policy, working folder and git branch, current context and token counters. Usage groups follow the selected provider and explain when its allowance cannot be read. Claude plan collection is available today; other providers' quota integrations remain separate work.
 
 ![The chip strip on a dark theme: model, effort, permission mode, directory, branch, context usage and Claude plan limits](screenshots/status-panel-dark.png)
 
@@ -18,16 +18,20 @@ Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the f
 | Directory | Repo root folder name when in a git repo, else the workspace folder |
 | Branch | Current branch, with `±n` uncommitted-file count |
 | Context | Reported current occupancy and window; separate token counters remain available even without a percentage |
-| 5h / 7d | Claude plan utilization bars with reset times |
-| Scoped caps | Model-scoped plan limits, e.g. `7d Fable` |
+| Primary / secondary window | The provider's reported windows, with their actual labels, durations and resets; Claude currently reports `5h` / `7d` |
+| Additional limits / credits | Other buckets, model caps and reported credits, including limits without a model scope |
 
-Bars turn yellow and then red as a limit gets close, and a reading the panel could not refresh is drawn muted so a stale number does not look like a current one.
+Percentage bars show usage used and turn yellow and then red as a limit gets close. Remaining percentages are converted to used, with the source reading explained in the tooltip. Quantities and credit balances have no invented percentage or urgency color. Cached readings retain their last successful observation time and render muted; unknown values never mean zero or unlimited. The screenshots above show the earlier Claude-only labels.
 
 ## Usage
 
 Open the panel from its icon in the left rail, or toggle it with **Ctrl+Shift+S**. It also appears in the bottom panel group under `Ctrl+J`.
 
 The gear chip at the end of the strip opens a picker for which segments appear and in what order. That choice is stored globally, so it follows you from workspace to workspace instead of resetting per project.
+
+Usage has three stable controls: **Primary window**, **Secondary window**, and **Additional limits / credits**. Their labels explain the current contents. New or renamed buckets stay within these groups without adding duplicate controls. Adapters identify primary and secondary windows; unfamiliar windows remain visible under additional limits. Enabled groups stay visible when reporting is unsupported, sign-in is required, a reading is unavailable, or no window applies.
+
+Existing Claude settings migrate in place: the old 5h control becomes primary, 7d becomes secondary, and model-scoped limits become additional. Each keeps its position and hidden state, including positions between other chips. Startup and update-check settings are preserved. Migration reads do not overwrite storage; the next settings edit saves the new format. Reset explicitly restores defaults.
 
 ## Staying up to date
 
@@ -49,7 +53,9 @@ Context percentages use current occupancy, never accumulated billed tokens. A me
 
 Real host fixtures cover Claude and Codex. Copilot/Cursor capabilities come from host source inspection; custom/future model cases have automated fallback coverage. This does not claim live execution has been verified for every provider.
 
-Beside a session from another provider (Copilot, Cursor, Codex), or a session with an unknown provider, the plan chips relabel to `Claude 5h` / `Claude 7d` and render muted. Their tooltips name the provider and explain that the reading comes from the Claude login/config source; association with the selected session's account is unverified. No other provider's quota is reported. Switching sessions clears the old session's readings while the new selection resolves. Existing segment order and visibility preferences are preserved.
+Usage now follows the selected provider instead of substituting Claude limits beside a Codex, Copilot, Cursor or unknown-provider session. Those integrations show honest unsupported/unavailable states until an account adapter supplies a verified reading. This does not promise a universal ChatGPT quota, API-key allowance or monetary spend inferred from tokens. The presentation supports arbitrary windows, non-model buckets and credit details; that support does not claim a live collector exists for every provider.
+
+Every usage card names its provider. Tooltips identify its source, account/workspace scope when reported, reset and observation time. Claude readings come from the Claude login/config source; association with the selected session's account remains unverified and is stated explicitly. Ambiguous or mismatched scopes do not become a selected-account reading. Any separately displayed foreign account reading remains attributed and muted. With no session selected, the standalone Claude view remains explicitly labeled. Switching sessions clears the old readings while the new selection resolves. Existing segment order and visibility preferences are preserved.
 
 ## Install
 

@@ -14,8 +14,8 @@ function percent(value: unknown): value is number {
 }
 
 function window(id: string, label: string, value: unknown, reset: unknown,
-  durationMinutes?: number): UsageWindow[] {
-  return percent(value) ? [{ id, label, durationMinutes,
+  durationMinutes?: number, role: UsageWindow['role'] = 'additional'): UsageWindow[] {
+  return percent(value) ? [{ id, label, durationMinutes, role,
     utilization: { value, unit: 'percent-used' },
     resetsAt: typeof reset === 'string' ? reset : null }] : [];
 }
@@ -23,8 +23,8 @@ function window(id: string, label: string, value: unknown, reset: unknown,
 /** Keep source labels/semantic IDs; neither utilization nor reset time is identity. */
 export function normalizeClaudePlan(usage: PlanUsage): AccountUsage {
   const buckets: UsageBucket[] = [{ id: 'plan', label: 'Claude plan', windows: [
-    ...window('five-hour', '5h', usage.fiveHour, usage.fiveHourReset, 300),
-    ...window('seven-day', '7d', usage.sevenDay, usage.sevenDayReset, 10080),
+    ...window('five-hour', '5h', usage.fiveHour, usage.fiveHourReset, 300, 'primary'),
+    ...window('seven-day', '7d', usage.sevenDay, usage.sevenDayReset, 10080, 'secondary'),
   ] }];
   const scoped = (usage.allLimits ?? []).filter((limit) => limit.model);
   if (scoped.length) {
@@ -56,7 +56,8 @@ export function normalizeClaudePlan(usage: PlanUsage): AccountUsage {
     const id = limit.group === 'session' ? 'five-hour' : limit.group === 'weekly' ? 'seven-day' : `group:${limit.group}`;
     if (buckets[0].windows.some((entry) => entry.id === id)) continue;
     buckets[0].windows.push(...window(id, limit.group === 'session' ? '5h' : limit.group === 'weekly' ? '7d' : limit.group,
-      limit.percent, limit.resets, limit.group === 'session' ? 300 : limit.group === 'weekly' ? 10080 : undefined));
+      limit.percent, limit.resets, limit.group === 'session' ? 300 : limit.group === 'weekly' ? 10080 : undefined,
+      limit.group === 'session' ? 'primary' : limit.group === 'weekly' ? 'secondary' : 'additional'));
   }
   return { buckets };
 }

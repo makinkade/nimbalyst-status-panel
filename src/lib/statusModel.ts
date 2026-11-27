@@ -113,6 +113,8 @@ export interface ExecutionRestrictions {
 export interface UsageWindow {
   id: string;
   label: string;
+  /** GET-225: semantic placement supplied by the adapter; unknown roles stay additional. */
+  role?: 'primary' | 'secondary' | 'additional';
   durationMinutes?: number;
   utilization: { value: number; unit: 'percent-used' | 'percent-remaining' | 'credits' | 'tokens' };
   resetsAt: string | null;

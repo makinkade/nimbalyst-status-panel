@@ -6,12 +6,14 @@ export const SEGMENT_IDS = [
   'directory',
   'branch',
   'context',
-  'usage5h',
-  'usage7d',
-  'usageScoped',
+  'usagePrimary',
+  'usageSecondary',
+  'usageAdditional',
 ] as const;
 
 export type SegmentId = (typeof SEGMENT_IDS)[number];
+export const USAGE_GROUP_IDS = ['usagePrimary', 'usageSecondary', 'usageAdditional'] as const;
+export type UsageGroupId = (typeof USAGE_GROUP_IDS)[number];
 
 export const SEGMENT_LABELS: Record<SegmentId, string> = {
   model: 'Model',
@@ -20,9 +22,9 @@ export const SEGMENT_LABELS: Record<SegmentId, string> = {
   directory: 'Directory',
   branch: 'Git branch',
   context: 'Context usage',
-  usage5h: '5h limit',
-  usage7d: '7d limit',
-  usageScoped: 'Model-scoped limits',
+  usagePrimary: 'Primary window',
+  usageSecondary: 'Secondary window',
+  usageAdditional: 'Additional limits / credits',
 };
 
 /** Popover tooltips: what each segment actually reports. */
@@ -34,15 +36,14 @@ export const SEGMENT_DESCRIPTIONS: Record<SegmentId, string> = {
   branch: 'Current git branch, with a count of uncommitted files.',
   context:
     'Reported current context occupancy and window, with separate session token counters even when no percentage is available.',
-  // All three describe your Claude plan whatever session is focused, which is
-  // why the chips qualify themselves beside a session from another provider.
-  usage5h: 'Your rolling 5-hour Claude plan utilization, and when it resets.',
-  usage7d: 'Your rolling 7-day Claude plan utilization, and when it resets.',
-  usageScoped:
-    'Model-scoped Claude plan caps reported by the usage API, such as a separate weekly limit for one model.',
+  usagePrimary: 'The selected provider’s primary usage window, with its reported duration and reset.',
+  usageSecondary: 'The selected provider’s secondary usage window, when one applies.',
+  usageAdditional: 'Additional usage buckets, model caps and credits reported by the selected provider.',
 };
 
 export interface SegmentConfig {
+  /** GET-225: v2 migrates the fixed Claude controls to stable usage groups. */
+  version: 2;
   order: SegmentId[];
   hidden: SegmentId[];
   /**
@@ -67,6 +68,7 @@ export interface SegmentConfig {
 }
 
 export const DEFAULT_CONFIG: SegmentConfig = {
+  version: 2,
   order: [...SEGMENT_IDS],
   hidden: [],
   autoOpen: true,
@@ -79,19 +81,28 @@ export const DEFAULT_CONFIG: SegmentConfig = {
  * later version shows up instead of silently vanishing.
  */
 export function normalizeConfig(stored: unknown): SegmentConfig {
-  if (!stored || typeof stored !== 'object') return { ...DEFAULT_CONFIG, order: [...SEGMENT_IDS] };
+  if (!stored || typeof stored !== 'object') return { ...DEFAULT_CONFIG, order: [...SEGMENT_IDS], hidden: [] };
 
   const candidate = stored as Partial<SegmentConfig>;
   const known = new Set<string>(SEGMENT_IDS);
 
-  const order = (Array.isArray(candidate.order) ? candidate.order : [])
-    .filter((id): id is SegmentId => known.has(id));
+  // Map before filtering: dropping old IDs first would reset both their exact
+  // position among other cards and every hidden Claude control (GET-225).
+  const aliases: Record<string, SegmentId> = {
+    usage5h: 'usagePrimary', usage7d: 'usageSecondary', usageScoped: 'usageAdditional',
+  };
+  const reconcile = (value: unknown): SegmentId[] => [...new Set(
+    (Array.isArray(value) ? value : [])
+      .filter((id): id is string => typeof id === 'string')
+      .map((id) => Object.prototype.hasOwnProperty.call(aliases, id) ? aliases[id] : id)
+      .filter((id): id is SegmentId => known.has(id)),
+  )];
+  const order = reconcile(candidate.order);
   for (const id of SEGMENT_IDS) {
     if (!order.includes(id)) order.push(id);
   }
 
-  const hidden = (Array.isArray(candidate.hidden) ? candidate.hidden : [])
-    .filter((id): id is SegmentId => known.has(id));
+  const hidden = reconcile(candidate.hidden);
 
   // Absent in configs saved before the option existed -- fall back to the
   // default rather than reading `undefined` as "off".
@@ -102,7 +113,7 @@ export function normalizeConfig(stored: unknown): SegmentConfig {
       ? candidate.checkForUpdates
       : DEFAULT_CONFIG.checkForUpdates;
 
-  return { order, hidden, autoOpen, checkForUpdates };
+  return { version: 2, order, hidden, autoOpen, checkForUpdates };
 }
 
 export function moveSegment(order: SegmentId[], id: SegmentId, delta: number): SegmentId[] {

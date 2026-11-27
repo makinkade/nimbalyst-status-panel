@@ -2,15 +2,12 @@ import { Fragment, ReactNode } from 'react';
 import { Bar, Chip } from './components/Chip';
 import { ConfigChip } from './components/ConfigChip';
 import { UpdateChip } from './components/UpdateChip';
-import {
-  folderName,
-  formatCountdown,
-  formatResetTime,
-} from './lib/format';
-import { contextPresentation, effortPresentation, modelPresentation, permissionPresentation,
-  fixedClaudeUsage, type UsageBar } from './lib/statusPresentation';
-import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS } from './segments';
-import { MUTED, PALETTE, contextColor, permissionModeColor, usageColor } from './lib/thresholds';
+import { UsageChip } from './components/UsageChip';
+import { folderName } from './lib/format';
+import { contextPresentation, effortPresentation, modelPresentation, permissionPresentation } from './lib/statusPresentation';
+import { usagePresentation } from './lib/usagePresentation';
+import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS, USAGE_GROUP_IDS } from './segments';
+import { MUTED, PALETTE, contextColor, permissionModeColor } from './lib/thresholds';
 import { SegmentId } from './segments';
 import { PanelStorage, useSegmentConfig } from './useSegmentConfig';
 import { Status, useStatus } from './useStatus';
@@ -29,17 +26,17 @@ export function StatusPanel({ host }: { host: PanelHost }) {
   const { config, update, reset } = useSegmentConfig(host.storage);
   const availableUpdate = useUpdateCheck(host.storage, config.checkForUpdates);
 
-  // Name the scoped-caps row after the caps actually in force, so the config
-  // list says "Model caps (7d Fable)" rather than something abstract.
-  const scopedLabels = fixedClaudeUsage(status.readings).scoped.map((entry) => entry.label);
-  const labels = {
-    ...SEGMENT_LABELS,
-    usageScoped: scopedLabels.length
-      ? `Model caps (${scopedLabels.join(', ')})`
-      : SEGMENT_LABELS.usageScoped,
-  };
+  // Live labels explain what the stable groups contain. Bucket churn never
+  // changes the saved control IDs, visibility or position (GET-225).
+  const usage = usagePresentation(status.readings);
+  const labels = { ...SEGMENT_LABELS };
+  const descriptions = { ...SEGMENT_DESCRIPTIONS };
+  for (const id of USAGE_GROUP_IDS) {
+    labels[id] = usage[id].label;
+    descriptions[id] = usage[id].description;
+  }
 
-  const segments = buildSegments(status, workspacePath);
+  const segments = buildSegments(status, workspacePath, usage);
   const hidden = new Set(config.hidden);
 
   // The config chip renders unconditionally: it must stay reachable even when
@@ -70,7 +67,7 @@ export function StatusPanel({ host }: { host: PanelHost }) {
       <ConfigChip
         config={config}
         labels={labels}
-        descriptions={SEGMENT_DESCRIPTIONS}
+        descriptions={descriptions}
         onChange={update}
         onReset={reset}
         updateVersion={availableUpdate?.release.version ?? null}
@@ -80,7 +77,8 @@ export function StatusPanel({ host }: { host: PanelHost }) {
 }
 
 /** Exported for the segment tests, which render the strip without a DOM. */
-export function buildSegments(status: Status, workspacePath: string): Record<SegmentId, ReactNode> {
+export function buildSegments(status: Status, workspacePath: string,
+  usage = usagePresentation(status.readings)): Record<SegmentId, ReactNode> {
   const { readings, git } = status;
   const model = modelPresentation(readings);
   const effort = effortPresentation(readings);
@@ -92,11 +90,6 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
 
   // Repo root name when in a git repo, else the folder name -- as in the status line.
   const displayPath = folderName(git.repoPath ?? workspacePath);
-
-  // The plan chips report your Claude plan whatever the session is, so beside a
-  // session from another provider they have to say whose plan they mean.
-  const bars = fixedClaudeUsage(readings);
-  const foreign = bars.foreign;
 
   return {
     model: (
@@ -189,106 +182,8 @@ export function buildSegments(status: Status, workspacePath: string): Record<Seg
       </Chip>
     ),
 
-    usage5h: bars.fiveHour ? (
-      <UsageChip bar={bars.fiveHour} />
-    ) : (
-      <MissingBar label="5h" icon="schedule" reason={bars.hasReading ? 'The last plan-usage reading carried no 5h window.' : bars.reason} />
-    ),
-    usage7d: bars.sevenDay ? (
-      <UsageChip bar={bars.sevenDay} />
-    ) : (
-      <MissingBar label="7d" icon="calendar_month" reason={bars.hasReading ? 'The last plan-usage reading carried no 7d window.' : bars.reason} />
-    ),
-    usageScoped: bars.scoped.length ? (
-      bars.scoped.map((bar) => <UsageChip key={bar.key} bar={bar} />)
-    ) : (
-      // An empty `limits[]` is the API saying there are no model-scoped caps
-      // right now -- distinct from the usage endpoint being unreachable, which
-      // is the case worth flagging.
-      <Chip
-        icon="speed"
-        accent={MUTED}
-        title={
-          bars.hasReading && !bars.hasUnmeasuredScopedLimit
-            ? `No model-scoped caps on your Claude plan right now${
-                foreign ? ` (this is a ${foreign} session; the caps are not about it)` : ''
-              }`
-            : bars.hasUnmeasuredScopedLimit ? 'A model-scoped limit was reported without a usable reading' : bars.reason
-        }
-      >
-        <span className="sp-label">{bars.hasReading && !bars.hasUnmeasuredScopedLimit ? 'No scoped caps' : 'Scoped —'}</span>
-      </Chip>
-    ),
+    usagePrimary: usage.usagePrimary.cards.map((card) => <UsageChip key={card.key} card={card} />),
+    usageSecondary: usage.usageSecondary.cards.map((card) => <UsageChip key={card.key} card={card} />),
+    usageAdditional: usage.usageAdditional.cards.map((card) => <UsageChip key={card.key} card={card} />),
   };
-}
-
-/**
- * GET-97: keep configured usage segments visible when no reading is available.
- * A vanished chip looks like one hidden in the config popover; a placeholder
- * explains that it is enabled but its reading is missing.
- */
-function MissingBar({ label, icon, reason }: { label: string; icon: string; reason: string }) {
-  return (
-    <Chip icon={icon} accent={MUTED} title={reason}>
-      <span className="sp-label">{label} —</span>
-    </Chip>
-  );
-}
-
-/**
- * What the chip calls itself: `Claude 5h` beside a session from another
- * provider, `5h` beside a Claude one.
- *
- * The qualifier is only worth its width when there is something on screen it
- * could be confused with.
- */
-function usageBarLabel(bar: UsageBar): string {
-  return bar.foreign ? `Claude ${bar.label}` : bar.label;
-}
-
-function UsageChip({ bar }: { bar: UsageBar }) {
-  const stale = bar.stale;
-  const label = usageBarLabel(bar);
-
-  // A reading the panel cannot vouch for loses its red/green authority: the
-  // colour is a claim about urgency right now, for the session in front of you.
-  // A stale number fails the "right now" half; a Claude plan bar beside a Codex
-  // session fails the "for this session" half. Both demote to muted.
-  const color = stale || bar.foreign ? MUTED : usageColor(bar.percent);
-  const reset = formatResetTime(bar.reset);
-  const countdown = formatCountdown(bar.reset);
-
-  // The strip re-renders on the 5s status tick, so the countdown stays current.
-  const live = reset
-    ? `${label} at ${Math.round(bar.percent)}% — resets ${reset}${countdown ? ` (in ${countdown})` : ''}`
-    : `${label} at ${Math.round(bar.percent)}%`;
-
-  const notes = [live, 'Usage comes from your Claude sign-in. It has not been linked to the selected session’s account.'];
-
-  if (stale) {
-    notes.push(
-      `STALE — last reading that actually came back: ${formatResetTime(bar.staleSince) || 'unknown observation time'}. ` +
-        'The usage API rate-limits too, and it does so precisely when you are near a cap, ' +
-        'so this is the last value received rather than your current usage.',
-    );
-  }
-
-  if (bar.foreign) {
-    notes.push(
-      'This bar describes your Claude plan, not this session — the focused session runs on ' +
-        `${bar.foreign}. Plan usage is read from Anthropic with your Claude credentials, so it ` +
-        'is the same number whichever session is in front of you.',
-    );
-  }
-
-  return (
-    <Chip icon={bar.icon} accent={color} title={notes.join('\n\n')}>
-      <span className="sp-label">{label}</span>
-      <Bar percent={bar.percent} color={color} />
-      <span className="sp-value">
-        {Math.round(bar.percent)}%{stale ? '?' : ''}
-      </span>
-      {reset && <span className="sp-reset">↻ {reset}</span>}
-    </Chip>
-  );
 }
