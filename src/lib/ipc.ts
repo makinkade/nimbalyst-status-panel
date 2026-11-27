@@ -598,9 +598,11 @@ export function resolveEffortLevel(
 }
 
 export interface GitInfo {
+  /** null means the host could not determine whether this is a repository. */
+  isRepo: boolean | null;
   repoPath: string | null;
   branch: string | null;
-  dirtyCount: number;
+  dirtyCount: number | null;
 }
 
 /**
@@ -609,8 +611,8 @@ export interface GitInfo {
  * Both branches of the handler return an object -- `{ success: true, isRepo }`
  * or `{ success: false, error, isRepo: false }` -- so the answer is truthy
  * whatever it says, and reading it as a `boolean` made every folder a repo.
- * The app's own callers spell this `Boolean(result?.success && result.isRepo)`;
- * this is that. `git:branches` and `git:get-uncommitted-files` sit either side
+ * A successful negative answer means no repo; a failed/missing answer stays
+ * unknown (GET-227). `git:branches` and `git:get-uncommitted-files` sit either side
  * of it and disagree about the convention -- the first returns `{ branches,
  * current }` bare, the second `{ success, files }` -- which is why this is
  * checked per channel rather than unwrapped centrally in `invoke`.
@@ -620,26 +622,27 @@ interface IsRepoResponse {
   isRepo?: boolean;
 }
 
+/** GET-227: a failed read is neither a confirmed non-repo nor a clean tree. */
 export async function getGitInfo(workspacePath: string): Promise<GitInfo> {
-  const isRepo = await invoke<IsRepoResponse>('git:is-repo', workspacePath);
-  if (!isRepo?.success || !isRepo.isRepo) return { repoPath: null, branch: null, dirtyCount: 0 };
+  const result = await invoke<IsRepoResponse>('git:is-repo', workspacePath);
+  const isRepo = result?.success === true && typeof result.isRepo === 'boolean' ? result.isRepo : null;
+  if (isRepo !== true) return { isRepo, repoPath: null, branch: null, dirtyCount: null };
 
-  const branches = await invoke<{ current?: string }>('git:branches', workspacePath);
+  const branches = await invoke<{ current?: unknown }>('git:branches', workspacePath);
   const uncommitted = await invoke<unknown>('git:get-uncommitted-files', workspacePath);
-
   return {
-    repoPath: workspacePath,
-    branch: branches?.current || null,
+    isRepo, repoPath: workspacePath,
+    branch: typeof branches?.current === 'string' && branches.current.trim() ? branches.current : null,
     dirtyCount: countFiles(uncommitted),
   };
 }
 
-function countFiles(value: unknown): number {
+function countFiles(value: unknown): number | null {
   if (Array.isArray(value)) return value.length;
   if (value instanceof Set) return value.size;
   if (value && typeof value === 'object') {
-    const record = value as { files?: unknown };
-    if (Array.isArray(record.files)) return record.files.length;
+    const record = value as { success?: unknown; files?: unknown };
+    if (record.success === true && Array.isArray(record.files)) return record.files.length;
   }
-  return 0;
+  return null;
 }

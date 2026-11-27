@@ -18,18 +18,22 @@ export class AccountMonitor {
   private work: Promise<void> | undefined;
   private publish: (reading: Reading<AccountUsage>) => void = () => {};
   private workspacePath = '';
+  private onInvalidated: () => void = () => {};
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private lease = '';
 
   constructor(private adapter: AccountAdapter, private cache: AccountUsageCache) {
     this.adapter = adapter.create?.() ?? adapter;
   }
 
-  start(workspacePath: string, lease: string, publish: (reading: Reading<AccountUsage>) => void): void {
+  start(workspacePath: string, lease: string, publish: (reading: Reading<AccountUsage>) => void,
+    onInvalidated: () => void = () => {}): void {
     this.stop();
     this.active = true;
     this.workspacePath = workspacePath;
     this.lease = lease;
     this.publish = publish;
+    this.onInvalidated = onInvalidated;
     // Recheck at an actual scope boundary, never on the 5 s status tick.
     this.identityCheckedAt = -Infinity;
     const subscription = this.subscription;
@@ -49,6 +53,9 @@ export class AccountMonitor {
     this.work = undefined;
     this.cache.clear(this.adapter.id);
     this.adapter.invalidate?.();
+    this.onInvalidated();
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
     this.publish(missing('unavailable', this.adapter.id, this.adapter.scope(this.workspacePath),
       'Account identity changed; waiting for a new reading'));
   }
@@ -80,7 +87,20 @@ export class AccountMonitor {
         return;
       }
       const reading = await this.cache.read(this.adapter, scope, `${this.lease}:${generation}`, force);
-      if (valid()) this.publish(reading);
+      if (valid()) {
+        this.publish(reading);
+        clearTimeout(this.retryTimer);
+        this.retryTimer = undefined;
+        // Retry at the request floor instead of caching a throttled result for
+        // another complete polling interval. force bypasses only the local cache;
+        // the adapter still enforces its shared host request budget (GET-227).
+        if (reading.retryAt !== undefined && Number.isFinite(reading.retryAt)) {
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = undefined;
+            if (valid()) void this.refresh(true);
+          }, Math.max(250, reading.retryAt - Date.now()));
+        }
+      }
     })().catch(() => {
       if (valid()) this.publish(missing('unavailable', this.adapter.id,
         this.adapter.scope(this.workspacePath), 'Account usage is unavailable'));
@@ -98,6 +118,9 @@ export class AccountMonitor {
     this.unsubscribe = () => {};
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    this.onInvalidated = () => {};
     this.publish = () => {};
   }
 }

@@ -11,6 +11,7 @@ export interface UsageCard {
   percent: number | null;
   muted: boolean;
   stale: boolean;
+  cached?: boolean;
   reset: string;
   title: string;
 }
@@ -29,7 +30,7 @@ const ICONS: Record<UsageGroupId, string> = {
 };
 
 function providerName(id: string | null): string {
-  return id === 'claude-code' ? 'Claude' : id === 'openai-codex' ? 'Host-reported Codex' : id ?? 'Unknown provider';
+  return id === 'claude-code' ? 'Claude' : id === 'openai-codex' ? 'Codex' : id ?? 'Unknown provider';
 }
 
 /** Keep units verbatim in meaning; a credit quantity has no implied currency. */
@@ -83,7 +84,11 @@ function readingNotes(reading: Reading<AccountUsage>, model: StatusModel, stale:
   if (reading.lastSuccessfulFetchAt != null) notes.push(
     `Last successful fetch: ${new Date(reading.lastSuccessfulFetchAt).toLocaleString()}; this is not source observation time.`);
   if (reading.lastAttemptAt != null) notes.push(`Last attempt: ${new Date(reading.lastAttemptAt).toLocaleString()}.`);
-  if (stale) notes.push('STALE — showing the last successful cached reading, not current usage.');
+  if (reading.cached) notes.push('Cached from the previous visit to this session; waiting for an account refresh.');
+  if (reading.freshnessBasis === 'receipt') notes.push('Refresh age is measured from successful delivery; original source age remains unknown.');
+  if (stale && !reading.cached) notes.push(reading.freshnessBasis === 'receipt'
+    ? 'STALE — the latest refresh failed or no successful fetch has arrived within two minutes.'
+    : 'STALE — showing the last successful cached reading, not current usage.');
   if (reading.reason) notes.push(reading.reason);
   if (reading.value?.plan) notes.push(`Plan: ${reading.value.plan}.`);
   const count = reading.value?.resetCredits?.availableCount;
@@ -100,7 +105,7 @@ export function usagePresentation(model: StatusModel, explicit?: Reading<Account
   const reading = ageReading(explicit ?? selectedAccountUsage(model), now);
   const provider = providerName(reading.scope.provider);
   const unknownTime = reading.observedAt === null || !Number.isFinite(reading.observedAt) || reading.observedAt > now;
-  const stale = !!reading.value && (reading.state === 'stale' || unknownTime);
+  const stale = !!reading.value && (reading.state === 'stale' || (unknownTime && reading.freshnessBasis !== 'receipt'));
   const foreign = (model.session && reading.scope.provider !== model.provider.id) ||
     (!!reading.scope.workspacePath && reading.scope.workspacePath !== model.model.scope.workspacePath) ||
     (!!reading.scope.sessionId && reading.scope.sessionId !== model.session?.id);
@@ -118,8 +123,10 @@ export function usagePresentation(model: StatusModel, explicit?: Reading<Account
   const seenEmpty = new Set<string>();
   const card = (key: string, group: UsageGroupId, label: string, value: string | null, percent: number | null,
     detail: string[], reset = ''): UsageCard => ({
-    key: `${keyPrefix}:${key}`, icon: ICONS[group], label: `${provider} ${label}`, value, percent,
-    muted: stale || !!foreign || value === null, stale, reset,
+    key: `${keyPrefix}:${key}`, icon: ICONS[group], label: `${provider} ${reading.scope.provider === 'openai-codex' ? label.replace(/^codex(?:\s*:\s*|\s+|$)/i, '') : label}`, value, percent,
+    // Attribution/source-age uncertainty stays in the tooltip. A successful
+    // Codex fetch uses the same thresholds as Claude (Mark's GET-227 preference).
+    muted: stale || reading.cached === true || !!foreign || value === null, stale, cached: reading.cached, reset,
     title: [...new Set([...notes, ...detail])].join('\n'),
   });
 

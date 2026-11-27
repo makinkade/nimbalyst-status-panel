@@ -17,6 +17,8 @@ const manifest = JSON.parse(
 
 export default defineConfig(
   mergeExtensionConfig(createExtensionConfig({ entry: './src/index.ts' }), {
+    // Scan only the explicit browser checks, not ignored build/profile HTML.
+    optimizeDeps: { entries: ['scripts/verify-ui.html'] },
     define: {
       __PANEL_VERSION__: JSON.stringify(manifest.version ?? null),
       __PANEL_REPOSITORY_URL__: JSON.stringify(manifest.marketplace?.repositoryUrl ?? null),

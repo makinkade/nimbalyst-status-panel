@@ -9,7 +9,7 @@ export function UsageChip({ card }: { card: UsageCard }) {
     <Chip icon={card.icon} accent={color} title={card.title} className="sp-usage-chip">
       <span className="sp-label">{card.label}</span>
       {card.percent !== null && <Bar percent={card.percent} color={color} label={`${Math.round(card.percent)} percent used`} />}
-      {card.value !== null && <span className="sp-value">{card.value}{card.stale ? ' (stale)' : ''}</span>}
+      {card.value !== null && <span className="sp-value">{card.value}{card.cached ? ' (cached)' : card.stale ? ' (stale)' : ''}</span>}
       {card.reset && <span className="sp-reset">↻ {card.reset}</span>}
     </Chip>
   );

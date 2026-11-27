@@ -62,6 +62,7 @@ export function StatusPanel({ host }: { host: PanelHost }) {
         deliberately does not. It sits beside the gear for the same reason the
         gear does: it is about the panel, not about the session.
       */}
+      {status.cached && <span className="sp-loading" title="Showing this session's previous readings while fresh data loads.">Cached · refreshing</span>}
       {availableUpdate && <UpdateChip update={availableUpdate} />}
 
       <ConfigChip
@@ -88,7 +89,7 @@ export function buildSegments(status: Status, workspacePath: string,
   const contextPercent = readings.context.value?.percent ?? null;
   const contextAccent = readings.context.state === 'stale' || contextPercent === null ? MUTED : contextColor(contextPercent);
 
-  // Repo root name when in a git repo, else the folder name -- as in the status line.
+  // The current host git channels identify the workspace, not a repository root.
   const displayPath = folderName(git.repoPath ?? workspacePath);
 
   return {
@@ -143,23 +144,27 @@ export function buildSegments(status: Status, workspacePath: string,
     branch: git.branch ? (
       <Chip
         icon="call_split"
-        accent={PALETTE.purple}
-        title={git.dirtyCount > 0 ? `${git.dirtyCount} uncommitted file(s)` : 'Clean'}
+        accent={git.dirtyCount === null ? MUTED : PALETTE.purple}
+        title={git.dirtyCount === null ? 'Uncommitted-file count is unavailable'
+          : git.dirtyCount > 0 ? `${git.dirtyCount} uncommitted file(s)` : 'Clean'}
       >
         {git.branch}
-        {git.dirtyCount > 0 && <span className="sp-dirty">±{git.dirtyCount}</span>}
+        {git.dirtyCount !== null && git.dirtyCount > 0 && <span className="sp-dirty">±{git.dirtyCount}</span>}
+        {git.dirtyCount === null && <span className="sp-dirty">±?</span>}
       </Chip>
     ) : (
       <Chip
         icon="call_split"
         accent={MUTED}
         title={
-          git.repoPath
+          git.isRepo === true
             ? 'The current branch is not available'
-            : workspacePath ? `${workspacePath} is not a git repository` : 'No workspace folder open'
+            : !workspacePath ? 'No workspace folder open'
+              : git.isRepo === false ? `${workspacePath} is not a git repository`
+                : 'Git status is unavailable; repository detection did not succeed'
         }
       >
-        <span className="sp-label">{git.repoPath ? 'Branch —' : 'No repo'}</span>
+        <span className="sp-label">{!workspacePath ? 'No repo' : git.isRepo === false ? 'No repo' : git.isRepo === true ? 'Branch —' : 'Git —'}</span>
       </Chip>
     ),
 

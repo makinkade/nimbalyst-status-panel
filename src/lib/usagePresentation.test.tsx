@@ -5,6 +5,7 @@ import { UsageChip } from '../components/UsageChip';
 import { USAGE_GROUP_IDS } from '../segments';
 import { normalizeSessionStatus, selectedAccountUsage } from './providerAdapters';
 import { claudeReading, normalizeClaudePlan } from './providers/claude';
+import { normalizeCodexHost, CODEX_USAGE_UNBOUND } from './providers/codex';
 import { measured, missing, type AccountUsage, type Reading, type ReadingScope, type UsageWindow } from './statusModel';
 import { MUTED, NEUTRAL, PALETTE } from './thresholds';
 import { usagePresentation } from './usagePresentation';
@@ -215,7 +216,7 @@ describe('scope, states and freshness', () => {
     const data = model(reading(), 'openai-codex');
     const own = usagePresentation(data, undefined, now).usagePrimary.cards[0];
     expect(own).toMatchObject({ value: null, muted: true });
-    expect(own.label).toContain('Host-reported Codex');
+    expect(own.label).toContain('Codex');
     const retained = usagePresentation(data, data.accounts[0], now).usagePrimary.cards[0];
     expect(retained).toMatchObject({ value: '42% used', muted: true });
     expect(retained.title).toContain('not this session’s quota');
@@ -263,5 +264,37 @@ describe('audited Claude host payload in production presentation', () => {
     expect(result.usageSecondary.cards[0].label).toBe('Claude 7d');
     expect(result.usagePrimary.cards[0].title).toContain('claude-host');
     expect(account.observedAt).toBe(payload('claude-usage:get').lastUpdated);
+  });
+});
+
+describe('compact Codex labels with full attribution in tooltips', () => {
+  const fixture = JSON.parse(readFileSync(new URL('./fixtures/status-host-0.83.0.json', import.meta.url), 'utf8'));
+  const host = fixture.observations.find((r: { channel: string }) => r.channel === 'codex-usage:refresh').payload;
+  function present(payload: unknown) {
+    const account: Reading<AccountUsage> = { ...measured(normalizeCodexHost(payload)!, 'codex-host-account',
+      { ...scope, provider: 'openai-codex', accountId: null, association: 'unbound' }, null, now),
+      freshnessBasis: 'receipt', staleAfterMs: 120000, lastSuccessfulFetchAt: now, reason: CODEX_USAGE_UNBOUND };
+    return usagePresentation(model(account, 'openai-codex'), undefined, now);
+  }
+  it('renders the audited default windows/credits without duplicating provider or bucket names', () => {
+    const result = present(host);
+    expect(result.usagePrimary.cards[0].label).toBe('Codex 5h');
+    expect(result.usageSecondary.cards[0].label).toBe('Codex 7d');
+    expect(result.usageAdditional.cards.map(c => c.label)).toContain('Codex credits');
+    for (const card of Object.values(result).flatMap(g => g.cards)) {
+      expect(card.label).not.toMatch(/Host-reported|Codex codex/i);
+      expect(card.stale).toBe(false);
+      expect(card.muted).toBe(false);
+      expect(card.title).toContain('Host-reported Codex allowance');
+      expect(renderToStaticMarkup(<UsageChip card={card} />)).not.toContain('(stale)');
+    }
+  });
+  it('preserves meaningful names and distinct keys for additional buckets', () => {
+    const multiple = structuredClone(host);
+    multiple.limits.push({ ...structuredClone(multiple.limits[0]), id: 'code-review', name: 'Code review' });
+    const result = present(multiple);
+    expect(result.usagePrimary.cards.map(c => c.label)).toEqual(['Codex 5h', 'Codex Code review 5h']);
+    expect(new Set(result.usagePrimary.cards.map(c => c.key)).size).toBe(2);
+    expect(result.usagePrimary.cards[1].title).toContain('Bucket: Code review');
   });
 });

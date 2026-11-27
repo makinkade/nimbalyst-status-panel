@@ -28,6 +28,8 @@ export interface AccountAdapter {
   collect: (scope: ReadingScope, signal: AbortSignal) => Promise<Reading<AccountUsage>>;
   subscribe?: (refresh: () => void, authChanged: () => void) => () => void;
   invalidate?: () => void;
+  /** Passive invalidation while this provider is not selected; performs no reads. */
+  subscribeInvalidation?: (changed: () => void) => () => void;
 }
 
 export interface ProviderAdapter {

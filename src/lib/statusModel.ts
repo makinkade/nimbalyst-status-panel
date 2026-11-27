@@ -18,6 +18,10 @@ export interface ReadingScope {
 }
 
 export interface ReadingMetadata {
+  /** A previous visit's display snapshot, not a newly collected reading. */
+  cached?: boolean;
+  /** Earliest useful retry after a local request floor; not source freshness. */
+  retryAt?: number;
   source: string;
   scope: ReadingScope;
   /** Source observation time, not the time a cached getter returned it. */
@@ -27,6 +31,8 @@ export interface ReadingMetadata {
   lastSuccessfulFetchAt?: number | null;
   lastAttemptAt?: number;
   staleAfterMs?: number;
+  /** Receipt age is only time since successful delivery; observedAt stays unknown. */
+  freshnessBasis?: 'observation' | 'receipt';
   reason: string | null;
 }
 
@@ -61,10 +67,13 @@ export function measured<T>(
 /** Aging a cached value must not advance its successful observation/fetch time. */
 export function ageReading<T>(reading: Reading<T>, now = Date.now()): Reading<T> {
   if (reading.state !== 'available' || reading.staleAfterMs === undefined) return reading;
-  if (reading.observedAt !== null && reading.observedAt <= now &&
-    now - reading.observedAt <= reading.staleAfterMs) return reading;
+  const timestamp = reading.freshnessBasis === 'receipt' ? reading.lastSuccessfulFetchAt ?? null : reading.observedAt;
+  if (timestamp !== null && Number.isFinite(timestamp) && timestamp <= now &&
+    now - timestamp <= reading.staleAfterMs) return reading;
   return { ...reading, state: 'stale', value: reading.value,
-    reason: 'The last reading is old or its observation time is unknown.' };
+    reason: reading.freshnessBasis === 'receipt'
+      ? `The last successful fetch is old or its time is unknown.${reading.reason ? ` ${reading.reason}` : ''}`
+      : 'The last reading is old or its observation time is unknown.' };
 }
 
 export interface ProviderIdentity {

@@ -39,7 +39,7 @@ function codexStatus(overrides: Partial<StatusInputs> = {}): Status {
     effort: 'high',
     effortSource: 'builtin',
     permissionMode: 'bypass-all',
-    git: { repoPath: WORKSPACE, branch: 'master', dirtyCount: 2 },
+    git: { isRepo: true, repoPath: WORKSPACE, branch: 'master', dirtyCount: 2 },
     planUsage: null,
     usage: null,
     loading: false,

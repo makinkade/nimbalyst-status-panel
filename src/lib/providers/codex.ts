@@ -1,6 +1,6 @@
 import type { AccountAdapter } from '../providerAdapters';
 import { invokeQuiet, on } from '../ipc';
-import { measured, missing, type AccountUsage, type Reading, type ReadingScope, type UsageBucket, type UsageWindow } from '../statusModel';
+import { ageReading, measured, missing, type AccountUsage, type Reading, type ReadingScope, type UsageBucket, type UsageWindow } from '../statusModel';
 
 type ObjectValue = Record<string, unknown>;
 function object(value: unknown): ObjectValue | null {
@@ -117,6 +117,8 @@ export const CODEX_USAGE_UNBOUND =
   'Host-reported Codex allowance; account/session association and source observation time are unverified. ' +
   'This is not a universal ChatGPT allowance or a verified current-account reading.';
 export const CODEX_READ_INTERVAL_MS = 60_000;
+/** Two missed minute-budget reads count as old delivery, not unknown source age. */
+export const CODEX_STALE_AFTER_MS = 2 * CODEX_READ_INTERVAL_MS;
 
 export type CodexAuthMode = 'chatgpt' | 'apikey' | 'signed-out' | 'unknown';
 interface AuthStatus { mode: CodexAuthMode; revision: string }
@@ -177,7 +179,10 @@ export function createCodexAccountAdapter(overrides: Partial<CodexDependencies> 
   const receive = (value: unknown, scope: ReadingScope, receivedAt: number): Reading<AccountUsage> => {
     const usage = normalizeCodexHost(value);
     if (!usage) return failed(scope, 'Codex account allowance could not be read; the host response was unusable.');
-    last = { ...measured(usage, 'codex-host-account', scope, null, receivedAt, CODEX_READ_INTERVAL_MS),
+    // Unknown source age is not a failed/old fetch. Keep it explicit and muted,
+    // but reserve stale for failed refreshes or two minutes without delivery.
+    last = { ...measured(usage, 'codex-host-account', scope, null, receivedAt),
+      freshnessBasis: 'receipt', staleAfterMs: CODEX_STALE_AFTER_MS,
       reason: CODEX_USAGE_UNBOUND, lastSuccessfulFetchAt: receivedAt, lastAttemptAt: receivedAt };
     return last;
   };
@@ -201,7 +206,8 @@ export function createCodexAccountAdapter(overrides: Partial<CodexDependencies> 
         }
         if (!auth || deps.now() - authAt >= CODEX_READ_INTERVAL_MS) {
           if (budget.authPending || deps.now() - budget.authAt < CODEX_READ_INTERVAL_MS) {
-            return absent(scope, 'Codex authentication check is throttled; waiting for the next account read.');
+            return { ...absent(scope, 'Codex authentication check is throttled; waiting for the next account read.'),
+              retryAt: Math.max(deps.now() + 250, budget.authAt + CODEX_READ_INTERVAL_MS) };
           }
           readyForEvents = false;
           budget.authAt = deps.now(); budget.authPending = true;
@@ -228,7 +234,9 @@ export function createCodexAccountAdapter(overrides: Partial<CodexDependencies> 
               : absent(scope, 'Codex authentication is unknown or could not be checked.');
         }
         if (budget.usagePending || deps.now() - budget.usageAt < CODEX_READ_INTERVAL_MS) {
-          return failed(scope, 'Codex allowance refresh is throttled; waiting for the next account read.');
+          return { ...(last?.value ? { ...ageReading(last, deps.now()), lastAttemptAt: deps.now() }
+            : absent(scope, 'Codex allowance refresh is throttled; waiting for the next account read.')),
+            retryAt: Math.max(deps.now() + 250, budget.usageAt + CODEX_READ_INTERVAL_MS) };
         }
         readyForEvents = false;
         budget.usageAt = deps.now(); budget.usagePending = true;
@@ -243,6 +251,11 @@ export function createCodexAccountAdapter(overrides: Partial<CodexDependencies> 
       const current = collect().finally(() => { if (work === current) work = undefined; });
       work = current;
       return current;
+    },
+    subscribeInvalidation(changed) {
+      const stops = ['openai-codex:auth-updated', 'openai-codex:auth-login-completed']
+        .map((channel) => deps.on(channel, changed));
+      return () => { for (const stop of stops) stop(); };
     },
     subscribe(refresh, authChanged) {
       let live = true;

@@ -36,7 +36,7 @@ function emptyStatus(overrides: Partial<StatusInputs> = {}): Status {
     effort: 'high',
     effortSource: 'builtin',
     permissionMode: null,
-    git: { repoPath: null, branch: null, dirtyCount: 0 },
+    git: { isRepo: false, repoPath: null, branch: null, dirtyCount: 0 },
     planUsage: null,
     usage: null,
     loading: false,

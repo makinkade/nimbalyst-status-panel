@@ -32,7 +32,7 @@ export const SEGMENT_DESCRIPTIONS: Record<SegmentId, string> = {
   model: 'The requested model and last observed served identity, using catalog names or readable IDs.',
   effort: 'Configured reasoning effort, with session settings and applicable defaults distinguished. Effective effort is not reported.',
   permissionMode: 'Workspace policy: Ask, Allow all, Bypass or Agent-verified. Provider approval, sandbox and network access are separate readings.',
-  directory: 'The repo root folder when the workspace is a git repo, otherwise the workspace folder.',
+  directory: 'The workspace folder. The host git channels do not report a repository root.',
   branch: 'Current git branch, with a count of uncommitted files.',
   context:
     'Reported current context occupancy and window, with separate session token counters even when no percentage is available.',

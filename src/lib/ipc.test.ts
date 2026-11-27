@@ -548,22 +548,23 @@ describe('getGitInfo', () => {
     routeGit({ success: true, isRepo: false });
 
     await expect(getGitInfo(WS)).resolves.toEqual({
+      isRepo: false,
       repoPath: null,
       branch: null,
-      dirtyCount: 0,
+      dirtyCount: null,
     });
   });
 
-  it('treats a failed check as not a repo, not as a branchless one', async () => {
+  it('keeps failed detection unknown rather than claiming no repo', async () => {
     routeGit({ success: false, error: 'spawn git ENOENT', isRepo: false });
 
-    expect((await getGitInfo(WS)).repoPath).toBeNull();
+    expect(await getGitInfo(WS)).toMatchObject({ isRepo: null, repoPath: null, dirtyCount: null });
   });
 
-  it('says nothing is a repo when the channel is missing entirely', async () => {
+  it('keeps repository detection unknown when the channel is missing', async () => {
     routeGit(null);
 
-    expect((await getGitInfo(WS)).repoPath).toBeNull();
+    expect(await getGitInfo(WS)).toMatchObject({ isRepo: null, repoPath: null, dirtyCount: null });
   });
 
   it('still resolves a real repo through the same wrapper', async () => {
@@ -575,6 +576,7 @@ describe('getGitInfo', () => {
     });
 
     await expect(getGitInfo(WS)).resolves.toEqual({
+      isRepo: true,
       repoPath: WS,
       branch: 'master',
       dirtyCount: 2,

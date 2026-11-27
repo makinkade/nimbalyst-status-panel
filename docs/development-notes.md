@@ -40,7 +40,8 @@ src/
   lib/statusModel.ts  # scoped readings, capabilities, model/context/tokens/account contract
   lib/providerAdapters.ts # registry, generic fallback, common source normalization
   lib/providers/claude.ts # Claude account adapter and direct/host normalization
-  lib/accountMonitor.ts # adapter subscriptions, auth epochs and 60s Claude cadence
+  lib/providers/codex.ts # host account-source normalization and private throttled collector
+  lib/accountMonitor.ts # adapter subscriptions, auth epochs and independent 60s cadence
   lib/accountUsageCache.ts # scoped, memory-only cache and shared requests
   lib/statusPresentation.ts # common session-card labels/tooltips
   lib/usagePresentation.ts # scoped account cards, units, freshness and stable usage groups
@@ -71,9 +72,10 @@ src/
 | Context window | `tokenUsage.currentContext.contextWindow`, then `tokenUsage.contextWindow`, then model catalog context window; see the catalog shape caveat in the provider audit below |
 | Effort | Explicit `session.metadata.effortLevel`, otherwise app/built-in default only for audited applicable integration/model support. Defaults are labeled; missing applicability is a placeholder. This is configured effort, not provider-acknowledged effective effort. |
 | Permission mode | `workspace:get-state` → `agentPermissions` first; `app-settings:get("agentPermissionMode")` is a legacy fallback. This is workspace policy, not a session's effective restrictions. |
-| Branch / dirty | `git:is-repo`, `git:branches`, `git:get-uncommitted-files` |
+| Branch / dirty | `git:is-repo`, `git:branches`, `git:get-uncommitted-files`; failed detection/counts stay unknown, distinct from no repo/clean |
 | Tokens | `session.metadata.tokenUsage` |
-| Plan usage | `api.anthropic.com/api/oauth/usage`, falling back to `claude-usage:get()` |
+| Claude plan usage | `api.anthropic.com/api/oauth/usage`, falling back to `claude-usage:get()` |
+| Codex allowance | `openai-codex:check-login` then `codex-usage:refresh`, plus usage/auth events; explicitly unbound and unknown-age, never the old singleton getter or global file fallback |
 
 ### Plan usage
 
@@ -635,7 +637,8 @@ Nothing comparable exists in the registry (`extensions.nimbalyst.com`) — 27 bu
 1. **~~Cross-platform usage fetch.~~** Done — nothing is exec'd, so there is no command left to make portable.
 2. **~~Stop depending on `~/.claude/get-plan-usage.ps1`.~~** Done — the logic is in `src/lib/planUsage.ts`. One caveat remains: on macOS the host prefers the Keychain for the OAuth token and only falls back to `.credentials.json`, and the renderer cannot reach the Keychain, so a Keychain-only login degrades to `claude-usage:get`.
 3. **~~Harden the database dependency.~~** Done — `nimbalyst-database-read` and the raw SQL against `ai_sessions` are both gone. The panel resolves its session through `sessions:list` + `sessions:get`, so the only permission left is `filesystem` and nothing is coupled to an internal schema.
-4. **Non-Claude providers.** Still Claude-first, but no longer silently misleading — see [Model and provider support](../README.md#model-and-provider-support) and the marketplace `longDescription`. ~~Still to decide: hide the irrelevant chips or show honest placeholders.~~ Decided in GET-103, for honest placeholders: beside a session whose provider is not `claude-code`, the plan chips relabel to `Claude 5h` / `Claude 7d` / `Claude 7d Fable`, render in the muted accent rather than green/yellow/red, and name the session's actual provider in their tooltip. GET-223 extends this safeguard to an unknown selected provider. Identity now prefers the explicit session field, then unambiguous catalog metadata, then the model prefix. Model names use the catalog or supplied ID, while quota collection remains Claude-specific. The common contract and adapter registry are in place; dynamic usage settings and other-provider quota collectors remain follow-up work.
+4. **Provider support.** Common cards follow the selected provider, with generic fallback for custom/unknown models. Claude plan readings and explicitly unbound, unknown-age host-reported Codex allowances are integrated. Copilot, Cursor, generic OpenAI and custom-provider quotas have honest unsupported/unavailable states; no vendor quota is inferred from tokens. GET-225 provides three stable usage controls and preference migration. See [Model and provider support](../README.md#model-and-provider-support) and the GET-227 evidence matrix below. Effective restrictions remain unavailable (GET-229); canceled GET-228 is not a prerequisite. Earlier dated audit/foundation sections describe the historical state, not current blockers.
+
 5. **Packaging.** ~~Add the `marketplace` block~~ Done — `categories`, `tags`, `icon`, `tagline`, `longDescription`, `highlights` and `changelog` are populated, shaped against `ExtensionMarketplaceMetadata` in `@nimbalyst/extension-sdk/dist/types/extension.d.ts` rather than guessed from `resources/extensions/git/manifest.json`. `tagline`, `longDescription` and `highlights` are the copy shared with this README. ~~A license~~ is done too — MIT, in [LICENSE](../LICENSE) (GET-91); `ExtensionMarketplaceMetadata` has no license field, so `package.json` carries it as `"license": "MIT"`. ~~`repositoryUrl`~~ is set too, now that the repo is public. ~~Delivery~~ is done too — `npm run package` produces a verified `.nimext` and a tag push publishes it (GET-100); see [Releasing](#releasing). ~~Version and author identity~~ are done too (GET-93) — see [Published identity](#published-identity). ~~`screenshots`~~ are done too (GET-94) — `screenshots/status-panel-dark.png` and `-light.png`, wired as one entry's `src` and `srcLight`. An external extension must bundle real PNGs: `fileToOpen`/`selector` drive the internal capture pipeline only, and the registry's own `extensions.nimbalyst.com/screenshots/<id>/` is an R2 bucket nobody outside Nimbalyst can write to. `screenshots/` was already in the packaging script's file list, so the PNGs ship with the `.nimext` as well as heading this README.
 
 Publishing route is settled: **the registry is first-party only.** Every live entry is authored by Nimbalyst under `com.nimbalyst.*`, and `registry.json` is a generated artifact pushed to Nimbalyst's own R2 bucket rather than a file anyone can PR — being listed means a maintainer adds a local path to `packages/marketplace/release-extensions.txt`, which is a favour rather than a process. The docs' offer to "publish an extension you built yourself" has no workflow behind it.
@@ -646,11 +649,9 @@ The supported route is the app's own **Install from GitHub**: a public repo whos
 
 `src/lib/thresholds.ts` keeps the Night Owl palette literal — the point of the port is that a bar which is red in the terminal is red here — and the panel draws it over whatever surface the host theme provides. Those two facts have already collided once: the stale/unavailable bar used `PALETTE.light` (`#d6deeb`), which is Night Owl's *foreground*, meant to sit on dark navy. On a light theme a full bar in it was indistinguishable from an empty one. That path is now `MUTED`, i.e. `var(--nim-text-muted)`, which follows the theme instead of fighting it.
 
-The two captures in the [README](../README.md) (`screenshots/status-panel-dark.png` and `-light.png`) are the standing check. They are the same session 23 seconds apart with nothing changed but the theme, so a fill that vanishes on one surface shows up as a difference between two images rather than as a bug report.
+The current dark/light README captures show the same real Codex selection, with current workspace-policy labels and normal usage colors for successful Codex allowance windows. GET-227 records capture details below. No fixture values were substituted into these screenshots.
 
-What they actually cover is the green and yellow thresholds on a populated session — Context at 13 %, 5h at 24 %, 7d at 53 % — and the `No scoped caps` empty state. Two things they do not: the red band above 70/80 %, and the `MUTED` rendering itself, which needs either a stale reading or a non-Claude session to appear. Those are covered by tests (`src/StatusPanel.test.tsx`) and, for the non-Claude case, by an on-screen check in GET-103; they are not in these PNGs. Re-capture when a threshold colour changes.
-
-The red band has since been seen on the light theme anyway, incidentally rather than by arrangement: GET-98's checks ran with the 5h window at 83 %, and the bar read as clearly red against the light chip surface. That is one of the two gaps closed by observation, though not by these images.
+The original GET-94 captures showed Claude Context at 13%, 5h at 24%, 7d at 53%, and No scoped caps. Those images have been superseded. They did not cover red thresholds or muted data. The red band was later observed on a light theme during GET-98; threshold/color tests retain coverage without arranging live account usage at a particular percentage.
 
 Cropped to the panel's own bounds. The window around it is not the subject, and a full-window capture would date itself against every unrelated change to the rest of the app.
 
@@ -708,3 +709,105 @@ their answers in `{ success, ... }`; `git:branches` returns `{ branches, current
 }` bare. Each has to be read on its own terms, which is why `invoke` stays a
 thin pass-through instead of unwrapping centrally.
 
+
+## Multi-provider validation (GET-227, 2026-11-27)
+
+Baseline: clean tree at `2bdbe57` (GET-226 live integration committed); extension version remains 0.1.7. No release, package, tag or staging is part of this work. Host is packaged Nimbalyst 0.83.0 on Windows. The source audit and sanitized runtime fixtures above remain the contract reference. GET-228 is canceled; unverified Codex ownership/source time and incomplete switch detection are accepted limitations. Effective restrictions are independently unavailable (GET-229).
+
+### Evidence matrix
+
+“Fixture” below means production normalization/controller/render tests with sanitized GET-222 Claude/Codex host payloads. Source-derived and synthetic variants are labeled separately. A passed automated case does not establish a live account/plan observation.
+
+| Case | Common status and allowance behavior | Evidence |
+| --- | --- | --- |
+| Claude Code | Requested/past-reply identity; configured effort; current occupancy distinct from counters; independent Claude login/config quota | Real host fixture; automated lifecycle/presentation; GET-226 prior runtime plus GET-227 restarted development-panel observation |
+| ChatGPT-authenticated Codex | Requested identity, effort/context/counters; Host-reported Codex windows/credits; unbound, unknown-age and muted | Real host auth/usage fixtures; controller/live-adapter tests; GET-226 prior runtime plus GET-227 restarted development-panel observation |
+| API-key Codex | Common cards retained; subscription allowance unsupported | Synthetic auth variant of audited getter; no live login change |
+| Signed out / unknown auth | Sign-in required versus unavailable; unknown auth clears prior quota | Synthetic variants; no forced logout or auth failure |
+| Copilot | Requested identity; effort/context/tokens unsupported; folder/git/policy useful; quota unsupported | Host-source capabilities and synthetic controller/render matrix; no claimed live execution |
+| Cursor | Requested identity and reported token counters; effort/context unsupported; quota unsupported | Host-source capabilities and synthetic controller/render matrix; no claimed live execution |
+| Local/custom and generic OpenAI | Catalog/readable ID, explicit settings, supplied context/counters; no inferred ChatGPT/Claude quota | Synthetic controller/render cases for lmstudio, custom-local and openai |
+| Unknown provider / unfamiliar model | Readable exact identity; no assumed effort default; supplied zero context retained; all enabled cards explain missing quota | Synthetic provider/ID matrix, including absent provider |
+| No session / missing metadata | Folder/git/workspace policy retained; missing facts explained; standalone Claude view attributed | Existing normalizer, empty-state and controller tests |
+| No repo / unavailable git | Confirmed negative detection says No repo; failed detection says Git —; failed count says ±?, never Clean | New helper-to-render regressions using audited wrapper/bare host shapes and synthetic failures |
+| Denied/offline/401/429, stale, zero | Missing/failed is not measured zero; stale fetch/observation times retained; unknown source age stays muted | Existing Claude/Codex/cache/presentation tests and new git failures; forced live failures not performed |
+| Rapid switches / detected auth change / late work | Drop prior readings at detected boundaries, reject old continuations/events, preserve independent cadence | Production controller, monitor/cache and Codex live-adapter tests; synthetic changes do not prove atomic host ownership |
+| Arbitrary windows / multiple buckets / credits-only | Preserve actual durations/units/roles/resets; no invented percentage or monetary spend | Normalizer/presentation tests; unobserved plan/credit variants remain synthetic |
+
+### Implementation and regression scope
+
+Git status now carries `isRepo: true | false | null` and nullable dirty count. Successful negative detection alone means No repo. Failed/missing/malformed detection and failed file-list reads remain unavailable through the actual chip renderer. A known branch stays useful with `±?` and a muted accent when its file count cannot be refreshed. Existing IPC wrapper conventions and the 5 s git budget remain unchanged. The directory displays the workspace folder: these channels do not supply a repository root, including in a nested workspace.
+
+The provider matrix now passes source-derived/synthetic providers through the production controller and every configured card, including a minute of polling. Existing Claude/Codex fixtures, auth modes, file-fallback rejection, stale retention, scope invalidation and late callbacks are reused rather than duplicated.
+
+`npm run verify:ui` serves `/scripts/verify-ui.html`. Its five deterministic checks mount the production gear and hooks in the real browser DOM, using only synthetic local storage/network/host inputs. They cover legacy/v2 hydration with no writes, visibility/reorder/reset persistence, bucket-label changes, update opt-out, the 8 s delay, pending completion after disable, re-enable/request-floor behavior and unmount cleanup. They are separate from the Vitest count and do not install an extension update. No new dependency was added.
+
+### Runtime and final checks
+
+Verification completed on 2026-11-27 against packaged Nimbalyst 0.83.0 on Windows. Claude Code installation reports 2.1.330; the host's running bundled Codex binary reports codex-cli 0.167.0. Recomputed installed main/preload SHA-256 hashes exactly match GET-222's recorded hashes. No installed host source was changed.
+
+* `npm test`: **418 passed across 26 files** (17 additional cases: ten git source-to-card cases and seven provider/controller rows).
+* `npx tsc --noEmit`: passed. `npm run build`: passed, **30 modules**, no build warnings. `git diff --check`: passed.
+* **Five mounted-browser checks passed**, separately from Vitest, with no browser console errors/warnings on the final run. No real auth/network/update-install operation occurs in that harness.
+* Mark explicitly authorized the restart. Startup loaded the installed release copy with the older Auto/Claude-only labels. A development reload followed by closing/reopening the panel mounted this build. Inspection of the actual component's `GitInfo.isRepo` confirms GET-227 code was executing; build/reload success alone was not used as proof. The development reload is not a packaged-release installation.
+* **Live Codex:** requested GPT-6.1 Sol, session-configured High, Workspace: Agent-verified, folder/master/dirty count, 27% current context with separate counters, host-reported 5h/7d windows, zero credit balance and one reset credit. All Codex allowance borders resolved to the actual theme-muted color; tooltips retained unbound scope, unknown source observation time and separate successful-fetch/attempt timestamps.
+* **Live provider selection:** selected an existing Claude session, observed Opus 5.5 (1M), its context/counters and explicitly labeled Claude windows, then restored the original Codex session. No Claude quota remained after the observed Codex boundary. No prompt was submitted and no session/account was created or changed. Current workspace inventory contained 24 Claude and 10 Codex sessions; no other provider's live execution was available in this sample.
+* **Live controls/keeper:** gear hide, reorder and reset wrote the expected preferences; update opt-out and restoration persisted. Trusted Chromium keyboard events for Ctrl+Shift+S closed/reopened the panel, and deliberate closes remained closed. Mode switches recovered the panel; the keeper respected an open terminal and recovered after it closed. No terminal command ran. Other-bottom-panel occupancy and bounded retry behavior remain automated keeper cases.
+* **Themes/screenshots:** visually inspected both replacement screenshots of the real Codex panel at a 1400-pixel viewport, cropped to its 1296×70 panel bounds. Context was 27%, windows 9%/40%, credit balance 0 and reset credits 1 in both captures; writing screenshots changed the repo dirty count between captures. No values were injected or composited. The narrow 420-pixel viewport had no horizontal/vertical strip overflow and its gear popover stayed on screen. No live high-urgency Codex allowance was arranged; muted threshold coverage remains automated.
+* The restarted Nimbalyst process had the same two Codex child processes before and after the runtime pass. This establishes reuse during this check, not cold-start behavior. The matching installed-source audit establishes that auth checks and explicit refresh can start the host-managed auth app-server.
+* Original session selection, system theme, global segment/behavior preferences, viewport and open panel were confirmed restored. Verification used the existing local renderer debugging endpoint; no temporary extension or probe storage keys were created. The temporary in-memory verifier was removed.
+
+**Not exercised live:** Copilot/Cursor/custom/unknown providers; no-session/non-repo/denied cases; logout, real account/workspace changes, API-key/signed-out/expired auth, forced offline/401/429 responses, alternate plans, credit-only/multiple-bucket accounts, compaction during a new turn, cold auth-process startup, or an extension update installation. These are source-derived/synthetic where covered above, otherwise explicitly unavailable. The host still cannot prove atomic account ownership, expose original Codex observation times or detect every switch. No release, package, version bump, staging, commit, tag or push was performed.
+
+### Proposed shared agent instructions
+
+For Mark's review before updating AGENTS.md: replace the Claude-first chip table with provider-independent common cards and three stable usage groups; name `statusController`, `statusModel`, adapters, monitor and scoped cache; update model/context/configured-effort/workspace-policy precedence to the GET-222 audit; retain independent 1 s/5 s/60 s budgets; document host-reported unbound Codex collection, unknown observation time and potential managed auth-process startup. Distinguish unavailable git data from confirmed No repo/Clean. The workspace folder is not a verified repository root. Keep dated historical audit limitations separate from current scope and canceled GET-228. This installation also exposes a working renderer CDP endpoint through DevToolsActivePort; packaged console inaccessibility is not an absolute rule, and that endpoint must be rechecked rather than assumed on another installation.
+
+
+### Session-return display cache (GET-227 follow-up)
+
+Mark requested that a returning session display its previous data until refresh instead of going blank. This supersedes the earlier selection-boundary description for previously visited sessions. Collection still starts a new generation and rejects late work; the visible fallback is an explicitly cached session snapshot, not a fresh account reading.
+
+`StatusController` retains an LRU of the last 50 visited sessions, within one mounted workspace/controller. Returning selection IDs restore only their own snapshot before full-session IPC completes. Common facts render muted with Cached · refreshing; allowance values keep their source/scope/observation/fetch timestamps and say (cached). Unknown observation time and unbound Codex ownership remain explicit. Other sessions never inherit those values. The current workspace's latest git reading is retained while its next refresh runs.
+
+A fresh full record replaces cached common facts. A changed provider/requested model or a no-longer-resolving session invalidates incompatible cached data. A completed unavailable/unsupported/sign-in result removes the old allowance; a locally throttled attempt has not refreshed anything and may retain that session's cached display. `retryAt` schedules the next useful account attempt at the shared request floor rather than waiting another whole poll/cache interval. The adapter still enforces its request budget, and no refresh timestamp or account ownership is manufactured.
+
+Detected auth changes purge affected allowances across all snapshots. Codex's passive invalidation subscriptions remain while another provider is selected; they only listen and never read auth/quota or start a process. Monitor identity invalidation and completed unauthenticated/unknown/API-key outcomes clear old snapshots too. All watchers/retry timers and snapshots are disposed on stop. Nothing is persisted across panel unmount/restart, and the host still cannot detect or prove every account change.
+
+Follow-up verification: `npm test` passed **428 tests across 26 files**. TypeScript checking, production build (**30 modules**, no warnings) and diff checks passed. Ten added controller cases cover returning cached common facts, same-provider session separation, immutable original timestamps, precise retry after a delayed initial auth call, replacement by a new reading, inactive-provider auth-event purge without host reads, completed unavailable/unsupported/signed-out results, model/provider/session changes, bounded eviction, workspace isolation and stop cleanup. Existing late-result/generation tests still pass.
+
+After development reload and an explicit close/reopen remount, a live existing Codex → Claude → Codex round trip preserved 25%/42% windows as (cached), with the exact original successful-fetch time and no inherited Claude allowance. The scheduled read replaced that snapshot automatically (5h changed to 26%; cached marker cleared). Its successful fetch was about 60.5 seconds after the previous fetch, respecting the shared floor without waiting another whole polling interval. This directly observed cache behavior identifies the mounted follow-up build; no second Nimbalyst restart was performed for this follow-up. Original selection and open panel were restored, the temporary in-memory verifier removed, and its two ignored helper scripts deleted. Theme/preferences were not changed. No login/account changes or new prompts were made.
+
+The earlier 418-test/restarted runtime pass describes the pre-cache build. The five mounted gear/update checks remain prior evidence for unchanged controls; they were not rerun for this follow-up. No compact-label or unknown-freshness redesign is included in this cache request. The previous steady-state screenshots remain representative: caching changes the temporary return state rather than those labels.
+
+
+### Compact Codex labels and refresh status (GET-227 follow-up)
+
+Mark requested fixes for the repeated Host-reported Codex codex prefix and perpetual stale suffix. This supersedes the original GET-226 always-stale presentation and the preceding cache follow-up's unchanged-label/unknown-freshness limitation. The host's source contract and accepted ownership gaps are unchanged.
+
+Visible cards now say Codex 5h, Codex 7d, Codex credits and Codex Reset credits. Presentation removes a redundant leading Codex word from source labels after adding the provider prefix. Meaningful additional bucket names, stable IDs, exact source labels and units remain in the normalized data/tooltips. Host-source attribution and unverified account/session ownership stay in tooltips rather than every visible label.
+
+Codex sets `freshnessBasis: receipt`, with `observedAt: null` unchanged. A successful response/event records the actual successful-receipt time and is available without a stale suffix. It stays muted because original source age/ownership remain unknown. `ageReading` uses only lastSuccessfulFetchAt for this explicit basis; a failed attempt or generic fetchedAt cannot refresh it. Observation-based sources such as Claude keep their existing rules. No host processing timestamp becomes a source observation.
+
+Codex becomes stale after a completed failed refresh or more than two minutes without successful delivery (two one-minute request budgets). A successful later response clears the stale state. A locally throttled attempt preserves the last reading's age instead of reporting a failure. Per-session display snapshots still say (cached) until replaced. Unknown/future/missing successful receipt timestamps fail conservatively. This describes delivery recency, not proof that the host's underlying source is current.
+
+Verification: `npm test` passed **437 tests across 26 files**. TypeScript checking, production build (**30 modules**, no warnings) and diff checks passed. Nine added cases cover real-fixture compact default window/credit labels, meaningful multiple-bucket names/keys, high-usage successful receipts staying muted without false stale, two-minute aging without changing original timestamps, missing/future/invalid success times, throttled attempts, failed refresh and later recovery. Existing cache/selection/auth guards remain covered.
+
+Reloaded the development bundle and explicitly closed/reopened the actual panel. Live labels were Codex 5h, Codex 7d, Codex credits and Codex Reset credits. Successful values had no stale suffix, while `observedAt` stayed null and unknown-age/unverified-ownership caveats remained in tooltips. A subsequent automatic successful refresh was also observed as available, without a stale suffix; no live failure was forced. Renderer verification used the committed React tree and visible tooltip timestamps rather than treating an older alternate fiber's snapshot as current.
+
+Replaced and visually inspected both real dark/light screenshots at the same 1400-pixel viewport, cropped to 1296×70 panel bounds. Both showed 34%/44% Codex windows, zero credit balance and one reset credit, without stale suffixes. The unknown-age allowance borders resolved to each theme's actual muted color. Context happened to be 70% (red); no source values or thresholds were injected. These PNGs supersede the earlier captures in the 418-test/cache log.
+
+Original selection, system theme, viewport and open panel were confirmed restored. No preferences/login/account state changed, no prompt was sent, no session was created, and no second app restart was performed for this follow-up. Temporary in-memory verifier and helper scripts were removed. No version bump, packaging, staging, commit or push.
+
+
+### Codex usage colors (GET-227 follow-up)
+
+Mark requested normal Codex usage colors, leaving attribution limitations in the tooltip. This supersedes the earlier policy that unknown original source age alone forces grey for successfully delivered Codex data. It does not change the unbound source metadata or claim a newly verified account/session association.
+
+Successful Codex percentage cards use the same existing green/yellow/red thresholds as Claude. Credit balances and other raw quantities use the existing neutral color, without invented urgency. Cached, stale, unavailable and foreign-scope readings stay muted. Source age/ownership qualifications remain in tooltips; account-change invalidation and refresh/caching rules are unchanged.
+
+Verification: `npm test` passed **437 tests across 26 files**; TypeScript checking, production build (**30 modules**, no warnings) and diff checks passed. Existing real-fixture and high-usage assertions now expect normal colors while retaining unbound/unknown-age tooltip details. Existing stale, cached, foreign-scope and unavailable coverage still passes. This display-policy change adds no account inference or provider calls.
+
+Reloaded and explicitly remounted the actual development panel. Successful Codex windows used the expected palette in both themes: the final captures showed 5h at 51% in yellow (`rgb(228, 207, 106)`) and 7d at 46% in green (`rgb(173, 219, 103)`). Credit/reset-credit quantities used the theme's neutral foreground. Tooltip inspection confirmed unknown observation time and unverified account/session association remained intact. Both unobscured 1296×70 real-panel screenshots were visually inspected and replaced; an obstructing relaunch notice was deferred with Later, without restarting/installing anything.
+
+Original session selection, system theme, viewport and open panel were restored. No preferences or login/account state changed. Temporary in-memory verifier and helper scripts were removed. No further app restart, version bump, packaging, staging, commit or push.

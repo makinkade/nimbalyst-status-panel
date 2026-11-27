@@ -26,7 +26,7 @@ function data(session: SessionRecord | null = codex, overrides: Partial<SessionI
 }
 function render(readings = data(), id: SegmentId = 'model', folder = workspacePath) {
   const status = { workspacePath: folder, readings, loading: false,
-    git: { repoPath: folder || null, branch: folder ? 'master' : null, dirtyCount: 2 } };
+    git: { isRepo: true, repoPath: folder || null, branch: folder ? 'master' : null, dirtyCount: 2 } };
   return renderToStaticMarkup(<>{buildSegments(status, folder)[id]}</>);
 }
 function served(session: SessionRecord, value: string) {

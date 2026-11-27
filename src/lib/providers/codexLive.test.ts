@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountMonitor } from '../accountMonitor';
 import { AccountUsageCache } from '../accountUsageCache';
 import { normalizeSessionStatus } from '../providerAdapters';
-import type { AccountUsage, Reading } from '../statusModel';
+import { ageReading, type AccountUsage, type Reading } from '../statusModel';
 import { usagePresentation } from '../usagePresentation';
-import { CODEX_READ_INTERVAL_MS, createCodexAccountAdapter, newCodexReadBudget } from './codex';
+import { CODEX_READ_INTERVAL_MS, CODEX_STALE_AFTER_MS, createCodexAccountAdapter, newCodexReadBudget } from './codex';
 
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/status-host-0.83.0.json', import.meta.url), 'utf8')) as {
   observations: Array<{ channel: string; payload: unknown }>;
@@ -48,18 +48,18 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-27T17:
 afterEach(() => { for (const monitor of monitors.splice(0)) monitor.stop(); vi.useRealTimers(); });
 
 describe('live Codex bridge using audited success shapes', () => {
-  it('checks auth and explicitly refreshes once, preserves unknown source age, and renders muted unbound values', async () => {
+  it('checks auth and explicitly refreshes once, preserves unknown source age, and renders normal colors with unbound attribution in the tooltip', async () => {
     const h = mount();
     await flush();
     expect(h.invoke.mock.calls).toEqual([['openai-codex:check-login'], ['codex-usage:refresh']]);
-    expect(h.latest()).toMatchObject({ state: 'stale', observedAt: null, fetchedAt: Date.now(),
+    expect(h.latest()).toMatchObject({ state: 'available', freshnessBasis: 'receipt', observedAt: null, fetchedAt: Date.now(),
       lastSuccessfulFetchAt: Date.now(), lastAttemptAt: Date.now(),
       scope: { accountId: null, association: 'unbound', workspacePath: '/one' } });
     const model = normalizeSessionStatus({ workspacePath: '/one', session: { id: 'selected', provider: 'openai-codex' },
       models: [], permissionMode: null, defaultEffort: null, accounts: [h.latest()] });
     const card = usagePresentation(model).usagePrimary.cards[0];
-    expect(card).toMatchObject({ value: '20% used', muted: true, stale: true });
-    expect(card.label).toContain('Host-reported Codex');
+    expect(card).toMatchObject({ value: '20% used', muted: false, stale: false });
+    expect(card.label).toBe('Codex 5h');
     expect(card.title).toContain('account/session association and source observation time are unverified');
     expect(card.title).toContain('Last successful fetch');
     expect(card.title).toContain('Local workspace');
@@ -207,5 +207,62 @@ describe('detected auth boundaries, cancellation and cleanup', () => {
     expect(s.disposed).toHaveLength(3);
     expect(vi.getTimerCount()).toBe(0);
     expect(s.invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('successful delivery age versus unknown source age', () => {
+  it('uses normal colors for a recently delivered high-usage reading while keeping attribution in the tooltip', async () => {
+    const s = source(); const high = structuredClone(quota) as any;
+    high.limits[0].windows[0].usedPercent = 95;
+    s.invoke.mockImplementation(async channel => channel === 'openai-codex:check-login' ? login : high);
+    const h = mount(s); await flush();
+    const reading = h.latest();
+    const data = normalizeSessionStatus({ workspacePath: '/one', session: { id: 'selected', provider: 'openai-codex' },
+      models: [], defaultEffort: null, permissionMode: null, accounts: [reading] });
+    const card = usagePresentation(data).usagePrimary.cards[0];
+    expect(card).toMatchObject({ label: 'Codex 5h', percent: 95, muted: false, stale: false });
+    expect(card.title).toContain('Observation time is unknown');
+    expect(card.title).toContain('account/session association and source observation time are unverified');
+    expect(card.title).not.toContain('STALE');
+    expect(reading.observedAt).toBeNull();
+  });
+
+  it('ages by successful receipt only and does not rewrite timestamps or invent observation time', async () => {
+    const h = mount(); await flush(); const reading = h.latest(); const now = Date.now();
+    expect(ageReading(reading, now + CODEX_STALE_AFTER_MS).state).toBe('available');
+    const old = ageReading(reading, now + CODEX_STALE_AFTER_MS + 1);
+    expect(old).toMatchObject({ state: 'stale', observedAt: null, fetchedAt: now, lastSuccessfulFetchAt: now });
+    expect(old.reason).toContain('last successful fetch is old');
+    expect(old.reason).toContain('unverified');
+    expect(reading.state).toBe('available');
+  });
+
+  it.each(['missing', 'future', 'invalid'])('does not use a recent attempt to mask a %s successful-fetch timestamp', async kind => {
+    const h = mount(); await flush();
+    const timestamp = kind === 'missing' ? null : kind === 'future' ? Date.now() + 1 : NaN;
+    const reading = { ...h.latest(), lastSuccessfulFetchAt: timestamp, fetchedAt: Date.now(), lastAttemptAt: Date.now() };
+    expect(ageReading(reading).state).toBe('stale');
+  });
+
+  it('does not call a locally throttled attempt a failed refresh', async () => {
+    const h = mount(); await flush(); const original = h.latest().lastSuccessfulFetchAt;
+    await vi.advanceTimersByTimeAsync(1000); await h.monitor.refresh(true);
+    expect(h.latest()).toMatchObject({ state: 'available', lastSuccessfulFetchAt: original, observedAt: null });
+    expect(h.latest().retryAt).toBeGreaterThan(Date.now());
+    expect(h.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('marks a real failed refresh stale and clears that warning on the next successful response', async () => {
+    const s = source(); const h = mount(s); await flush(); const first = h.latest().lastSuccessfulFetchAt;
+    s.invoke.mockImplementation(async channel => {
+      if (channel === 'openai-codex:check-login') return login;
+      throw Error('offline');
+    });
+    await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS);
+    expect(h.latest()).toMatchObject({ state: 'stale', lastSuccessfulFetchAt: first });
+    s.invoke.mockImplementation(async channel => channel === 'openai-codex:check-login' ? login : quota);
+    await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS);
+    expect(h.latest()).toMatchObject({ state: 'available', observedAt: null, lastSuccessfulFetchAt: Date.now() });
+    expect(h.latest().lastSuccessfulFetchAt).toBeGreaterThan(first!);
   });
 });

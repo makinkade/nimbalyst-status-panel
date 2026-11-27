@@ -2,9 +2,9 @@
 
 *A Nimbalyst bottom panel showing model, context usage and plan limits for the session you are talking to.*
 
-Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the focused Agent session: its requested model and last observed reply, configured reasoning effort, workspace policy, working folder and git branch, current context and token counters. Usage groups follow the selected provider and explain when its allowance cannot be read. Claude plan collection is available today; other providers' quota integrations remain separate work.
+Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the focused Agent session: its requested model and last observed reply, configured reasoning effort, workspace policy, working folder and git branch, current context and token counters. Usage groups follow the selected provider and explain when its allowance cannot be read. Claude plan usage and host-reported Codex allowances are available. Successful Codex readings use the same usage colors as Claude; their tooltips explain unverified account/session ownership and unknown original observation time.
 
-![The chip strip on a dark theme: model, effort, permission mode, directory, branch, context usage and Claude plan limits](screenshots/status-panel-dark.png)
+![The chip strip on a dark theme: model, effort, workspace policy, directory, branch, context usage and host-reported Codex allowances](screenshots/status-panel-dark.png)
 
 ![The same chip strip on a light theme](screenshots/status-panel-light.png)
 
@@ -15,13 +15,13 @@ Status Panel adds a strip of chips to Nimbalyst's bottom panel that tracks the f
 | Model | Catalog name or readable ID; verified served identity when available, with requested and past-reply IDs in the tooltip |
 | Effort | Configured effort, e.g. `High`; applicable defaults say `(default)`, and missing values have a placeholder |
 | Workspace policy | `Workspace: Ask` / `Allow all` / `Bypass` / `Agent-verified`; separate from provider approval, sandbox and network access |
-| Directory | Repo root folder name when in a git repo, else the workspace folder |
-| Branch | Current branch, with `±n` uncommitted-file count |
+| Directory | Workspace folder name; the host git channels do not report a repository root |
+| Branch | Current branch with `±n` uncommitted files; `±?` when the count is unavailable, `No repo` for a confirmed non-repository, `Git —` when detection fails |
 | Context | Reported current occupancy and window; separate token counters remain available even without a percentage |
 | Primary / secondary window | The provider's reported windows, with their actual labels, durations and resets; Claude currently reports `5h` / `7d` |
 | Additional limits / credits | Other buckets, model caps and reported credits, including limits without a model scope |
 
-Percentage bars show usage used and turn yellow and then red as a limit gets close. Remaining percentages are converted to used, with the source reading explained in the tooltip. Quantities and credit balances have no invented percentage or urgency color. Cached readings retain their last successful observation time and render muted; unknown values never mean zero or unlimited. The screenshots above show the earlier Claude-only labels.
+Percentage bars show usage used and turn yellow and then red as a limit gets close. Remaining percentages are converted to used, with the source reading explained in the tooltip. Quantities and credit balances have no invented percentage or urgency color. Cached readings retain their last successful observation time and render muted; unknown values never mean zero or unlimited. The screenshots show a real Codex session in both themes. Its successful percentage readings use the normal usage colors; tooltips explain unverified ownership and source age.
 
 ## Usage
 
@@ -53,13 +53,28 @@ Context percentages use current occupancy, never accumulated billed tokens. A me
 
 Real host fixtures cover Claude and Codex. Copilot/Cursor capabilities come from host source inspection; custom/future model cases have automated fallback coverage. This does not claim live execution has been verified for every provider.
 
-Usage now follows the selected provider instead of substituting Claude limits beside a Codex, Copilot, Cursor or unknown-provider session. Those integrations show honest unsupported/unavailable states until an account adapter supplies a verified reading. This does not promise a universal ChatGPT quota, API-key allowance or monetary spend inferred from tokens. The presentation supports arbitrary windows, non-model buckets and credit details; that support does not claim a live collector exists for every provider.
+Usage now follows the selected provider instead of substituting Claude limits beside a Codex, Copilot, Cursor or unknown-provider session. Claude uses its login/config source. Codex uses explicitly unbound host account-source readings. Copilot, Cursor, generic OpenAI and custom providers show unsupported or unavailable allowance states; their common session cards remain useful. This does not promise a universal ChatGPT quota, API-key allowance or monetary spend inferred from tokens. The presentation supports arbitrary windows, non-model buckets and credit details; that support does not claim a live collector exists for every provider.
 
-For a selected Codex session, the panel checks the host’s authentication state and reads account-source allowances through its existing managed integration. Cards say `Host-reported Codex`, remain muted, and explain that account/session association and original observation time are unverified. Successful fetch time and the latest attempt are separate; neither proves the source is current. Globally scanned session-file and token-only fallbacks are rejected. API-key, signed-out and unknown authentication receive their own explanatory states; generic OpenAI and custom providers do not inherit Codex allowances.
+For a selected Codex session, the panel checks the host’s authentication state and reads account-source allowances through its existing managed integration. Cards use compact labels such as `Codex 5h`, `Codex 7d` and `Codex credits`. Successful percentage readings use the same usage colors as Claude; tooltips explain that these are host-reported readings with unverified account/session association and unknown original observation time. Successful fetch time and the latest attempt are separate; neither proves the source is current. A successful refresh has no stale suffix merely because source age is unknown. Codex says `(stale)` after a failed refresh or more than two minutes without a successful fetch, and clears that warning after recovery. A locally throttled attempt does not count as a failed refresh. Globally scanned session-file and token-only fallbacks are rejected. API-key, signed-out and unknown authentication receive their own explanatory states; generic OpenAI and custom providers do not inherit Codex allowances.
 
-Activation and independent polling may start Nimbalyst’s existing managed Codex auth app-server. Auth checks and explicit usage refreshes have a shared one-minute minimum interval, including failures and selection changes; a young local update can defer the next read. Usage events update the local reading without another refresh. The extension creates no Codex client and never changes login state. Detected auth, provider or workspace changes clear values and reject late work. Readings are memory-only and explicitly unbound: the old host cannot guarantee atomic ownership or reveal every account/workspace switch. A failed quota refresh can retain a stale reading only within the unchanged local auth/configuration generation; unknown authentication clears it.
+Activation and independent polling may start Nimbalyst’s existing managed Codex auth app-server. Auth checks and explicit usage refreshes have a shared one-minute minimum interval, including failures and selection changes; a young local update can defer the next read. Usage events update the local reading without another refresh. The extension creates no Codex client and never changes login state. Detected auth changes clear affected cached allowances; provider/workspace collection boundaries reject late work. Readings are memory-only and explicitly unbound: the old host cannot guarantee atomic ownership or reveal every account/workspace switch. A failed quota refresh can retain a stale reading only within the unchanged local auth/configuration generation; unknown authentication clears it.
 
-Every usage card names its provider. Tooltips identify its source, account/workspace scope when reported, reset and observation time. Claude readings come from the Claude login/config source; association with the selected session's account remains unverified and is stated explicitly. Ambiguous or mismatched scopes do not become a selected-account reading. Any separately displayed foreign account reading remains attributed and muted. With no session selected, the standalone Claude view remains explicitly labeled. Switching sessions clears the old readings while the new selection resolves. Existing segment order and visibility preferences are preserved.
+Every usage card names its provider. Tooltips identify its source, account/workspace scope when reported, reset and observation time. Claude readings come from the Claude login/config source; association with the selected session's account remains unverified and is stated explicitly. Ambiguous or mismatched scopes do not become a selected-account reading. Any separately displayed foreign account reading remains attributed and muted. With no session selected, the standalone Claude view remains explicitly labeled. Switching to a session you have already visited restores its previous readings while fresh data loads. Common cards say Cached · refreshing; retained allowance values say (cached), keep their original timestamps and remain muted. The display cache is separate for each session within this workspace, holds the last 50 visited sessions in memory, and clears when the panel unmounts or Nimbalyst restarts. An unvisited session never inherits another session’s readings. Detected auth changes/sign-out clear affected cached allowances, and a fresh model/provider change discards incompatible data. Existing segment order and visibility preferences are preserved.
+
+### Capability and verification boundaries
+
+| Provider | Model, effort and context | Account allowance |
+| --- | --- | --- |
+| Claude Code | Requested model and last observed reply; configured effort; reported context/counters | Claude login/config-source plan usage; selected-session account association is unverified |
+| ChatGPT/Codex | Requested model; configured effort; reported context/counters | Host-reported Codex windows/credits; normal colors after a successful refresh, attribution/source-age limitations in tooltips |
+| API-key Codex | Same common cards when reported | ChatGPT subscription allowance is unsupported in API-key mode |
+| Copilot | Requested model; effort/context/counters unsupported in the audited host | Unsupported |
+| Cursor | Requested model and reported counters; effort/context unsupported | Unsupported |
+| Custom/local, OpenAI-compatible, unknown or future model | Catalog name/readable ID, explicit settings and reported context/counters where supplied | Unsupported or unavailable; no inherited Claude/Codex quota |
+
+Workspace policy, folder and git do not depend on provider quota support. Missing readings have an explanation, including sign-in required, unknown authentication and unavailable data. A denied/offline read cannot be treated as a measured zero. Provider-specific effective execution restrictions remain unavailable on the current host.
+
+Claude/Codex have real sanitized host fixtures and runtime observations. Copilot/Cursor capabilities are source-derived; custom, unknown and future-ID cases are synthetic tests. This is not a claim of live execution or account-switch verification for every row. The dated [verification matrix](docs/development-notes.md#multi-provider-validation-get-227-2026-11-27) separates those evidence levels and lists untested cases.
 
 ## Install
 
@@ -89,7 +104,9 @@ Installing your own build needs Extension Dev Tools (Settings → Advanced); the
 extension_install({ path: "/absolute/path/to/nimbalyst-status-panel" })
 ```
 
-A panel that is already mounted does not reliably pick up a reload, so restart Nimbalyst when a change does not show up.
+A mounted panel can retain an older component. Restart Nimbalyst, confirm the development installation is loaded, and reopen the panel if needed; a successful build or reload alone does not identify the running code.
+
+Mounted gear and update-hook checks use the real browser DOM without another test dependency: run `npm run verify:ui`, then open `http://127.0.0.1:4177/scripts/verify-ui.html`. The page lists each result; it uses synthetic storage/auth/network inputs and never installs an update. `npm test` runs the separate Vitest suites.
 
 Repo notes — host channels the panel reads, design decisions, release process — are in [docs/development-notes.md](https://github.com/makinkade/nimbalyst-status-panel/blob/master/docs/development-notes.md).
 
