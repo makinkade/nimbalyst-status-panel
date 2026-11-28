@@ -5,7 +5,7 @@ import { AccountUsageCache } from '../accountUsageCache';
 import { normalizeSessionStatus } from '../providerAdapters';
 import { ageReading, type AccountUsage, type Reading } from '../statusModel';
 import { usagePresentation } from '../usagePresentation';
-import { CODEX_READ_INTERVAL_MS, CODEX_STALE_AFTER_MS, createCodexAccountAdapter, newCodexReadBudget } from './codex';
+import { CODEX_READ_INTERVAL_MS, CODEX_REQUEST_FLOOR_MS, CODEX_STALE_AFTER_MS, createCodexAccountAdapter, newCodexReadBudget } from './codex';
 
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/status-host-0.83.0.json', import.meta.url), 'utf8')) as {
   observations: Array<{ channel: string; payload: unknown }>;
@@ -207,6 +207,74 @@ describe('detected auth boundaries, cancellation and cleanup', () => {
     expect(s.disposed).toHaveLength(3);
     expect(vi.getTimerCount()).toBe(0);
     expect(s.invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('session switches, cadence and pushed updates (review 2026-11-27)', () => {
+  const calls = (h: { invoke: { mock: { calls: unknown[][] } } }) => h.invoke.mock.calls.map(([channel]) => channel);
+
+  it('keeps the account reading across a session switch without a new host call', async () => {
+    const h = mount(); await flush();
+    const first = h.latest();
+    await vi.advanceTimersByTimeAsync(5000);
+    // What StatusController does at a selection boundary: stop, then start again.
+    h.monitor.stop();
+    h.monitor.start('/one', 'next-selection', (reading) => h.updates.push(reading));
+    await flush();
+    expect(h.latest()).toMatchObject({ state: 'available', value: first.value,
+      lastSuccessfulFetchAt: first.lastSuccessfulFetchAt, observedAt: null });
+    expect(h.latest().reason).not.toContain('throttled');
+    expect(calls(h)).toEqual(['openai-codex:check-login', 'codex-usage:refresh']);
+  });
+
+  it('forgets a stopped collector’s reading when auth changes while another session is selected', async () => {
+    const h = mount(); await flush();
+    h.monitor.stop();
+    h.monitor.forget();
+    h.monitor.start('/one', 'next-selection', (reading) => h.updates.push(reading));
+    await flush();
+    expect(h.latest().value).toBeNull();
+    await vi.advanceTimersByTimeAsync(CODEX_REQUEST_FLOOR_MS);
+    expect(h.latest().value).not.toBeNull();
+    expect(calls(h)).toHaveLength(4);
+  });
+
+  it('reads once per interval in steady state, with no refused ticks', async () => {
+    const h = mount(); await flush();
+    await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS - 1);
+    expect(calls(h)).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls(h)).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS);
+    expect(calls(h)).toHaveLength(6);
+    expect(h.updates.every((reading) => !reading.reason?.includes('throttled'))).toBe(true);
+    expect(h.updates.every((reading) => reading.state === 'available')).toBe(true);
+  });
+
+  it('uses a pushed update between reads and postpones the next background read', async () => {
+    const h = mount(); await flush();
+    const pushed = structuredClone(quota) as { limits: Array<{ windows: Array<{ usedPercent: number }> }> };
+    pushed.limits[0].windows[0].usedPercent = 64;
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    h.emit('codex-usage:update', pushed);
+    await flush();
+    expect(h.latest().value?.buckets[0].windows[0].utilization.value).toBe(64);
+    expect(h.latest().lastSuccessfulFetchAt).toBe(Date.now());
+    await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS - 1);
+    expect(calls(h)).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls(h)).toHaveLength(4);
+  });
+
+  it('keeps a failed refresh stale through a throttled retry instead of reviving it', async () => {
+    const s = source(); const h = mount(s); await flush();
+    s.invoke.mockImplementation(async (channel) => channel === 'openai-codex:check-login' ? login
+      : { source: 'session', limits: [] });
+    await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS);
+    expect(h.latest()).toMatchObject({ state: 'stale' });
+    expect(h.latest().reason).toContain('fell back to recent Codex session files');
+    await h.monitor.refresh(true);
+    expect(h.latest()).toMatchObject({ state: 'stale' });
   });
 });
 

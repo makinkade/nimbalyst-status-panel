@@ -1,7 +1,9 @@
 import { SEGMENT_DESCRIPTIONS, SEGMENT_LABELS, USAGE_GROUP_IDS, type UsageGroupId } from '../segments';
-import { formatCountdown, formatResetTime } from './format';
+import { formatCountdown, formatDuration, formatResetTime } from './format';
 import { selectedAccountUsage } from './providerAdapters';
-import { ageReading, type AccountUsage, type Reading, type StatusModel, type UsageBucket, type UsageWindow } from './statusModel';
+import {
+  ageReading, type AccountUsage, type Reading, type ResetCredit, type StatusModel, type UsageBucket, type UsageWindow,
+} from './statusModel';
 
 export interface UsageCard {
   key: string;
@@ -50,13 +52,6 @@ function windowValue(window: UsageWindow): { value: string | null; percent: numb
       note: `Reported ${unit} quantity; no percentage or monetary spend is inferred.` };
   }
   return { value: null, percent: null, note: 'The reported utilization unit is unsupported.' };
-}
-
-function durationText(minutes: number | undefined): string | null {
-  if (minutes === undefined || !Number.isFinite(minutes) || minutes <= 0) return null;
-  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
-  if (minutes % 60 === 0) return `${minutes / 60}h`;
-  return `${minutes}m`;
 }
 
 function readingNotes(reading: Reading<AccountUsage>, model: StatusModel, stale: boolean): string[] {
@@ -151,7 +146,7 @@ export function usagePresentation(model: StatusModel, explicit?: Reading<Account
       const value = windowValue(window);
       const reset = formatResetTime(window.resetsAt);
       const countdown = formatCountdown(window.resetsAt, now);
-      const duration = durationText(window.durationMinutes);
+      const duration = formatDuration(window.durationMinutes);
       // Source labels are authoritative. Include bucket identity for additional
       // limits so two non-model buckets with the same window label stay clear.
       const label = group === 'usageAdditional' && bucket.label && !window.label.includes(bucket.label)
@@ -178,7 +173,8 @@ export function usagePresentation(model: StatusModel, explicit?: Reading<Account
   const resetCredits = reading.value?.resetCredits?.availableCount;
   if (typeof resetCredits === 'number' && Number.isFinite(resetCredits) && resetCredits >= 0) {
     groups.usageAdditional.cards.push(card('reset-credits', 'usageAdditional', 'Reset credits',
-      `${resetCredits} available`, null, ['Reset-credit count reported by the source; this is not a monetary balance.']));
+      `${resetCredits} available`, null, ['Reset-credit count reported by the source; this is not a monetary balance.',
+        ...resetCreditNotes(reading.value?.resetCredits?.credits, now)]));
   }
 
   for (const id of USAGE_GROUP_IDS) {
@@ -198,6 +194,23 @@ export function usagePresentation(model: StatusModel, explicit?: Reading<Account
     if (measuredLabels.length) group.label += ` (${measuredLabels.join(', ')})`;
   }
   return groups;
+}
+
+/**
+ * One tooltip line per reported reset credit, so an expiring credit is visible
+ * before it lapses. Null details (not reported) and an empty list stay distinct.
+ */
+function resetCreditNotes(credits: ResetCredit[] | null | undefined, now: number): string[] {
+  if (credits === null) return ['Individual reset-credit details are not reported.'];
+  if (!credits?.length) return [];
+  return credits.map((credit) => {
+    const name = credit.title ?? 'Reset credit';
+    const expiry = formatResetTime(credit.expiresAt);
+    const countdown = formatCountdown(credit.expiresAt, now);
+    const when = expiry ? `expires ${expiry}${countdown ? ` (in ${countdown})` : ''}`
+      : credit.expiresAt ? 'expiry could not be read' : 'no expiry reported';
+    return `${name}: ${when}.${credit.description ? ` ${credit.description}` : ''}`;
+  });
 }
 
 function creditValue(bucket: UsageBucket): { value: string | null; note: string } {

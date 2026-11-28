@@ -139,10 +139,18 @@ export interface UsageBucket {
   plan?: string;
   credits?: { hasCredits?: boolean; unlimited?: boolean; balance?: string | number };
 }
+/** One reset credit as the source describes it; null fields were not reported. */
+export interface ResetCredit {
+  id: string;
+  title: string | null;
+  description: string | null;
+  expiresAt: string | null;
+}
 export interface AccountUsage {
   buckets: UsageBucket[];
   plan?: string;
-  resetCredits?: { availableCount?: number; credits?: unknown[] | null };
+  /** null details and an empty list mean different things; see development notes. */
+  resetCredits?: { availableCount?: number; credits?: ResetCredit[] | null };
 }
 
 export interface StatusModel {

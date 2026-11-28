@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { adapterFor } from '../providerAdapters';
-import { codexAccountAdapter, createCodexAccountAdapter, newCodexReadBudget, normalizeCodexHost } from './codex';
+import { codexAccountAdapter, codexRejectionReason, createCodexAccountAdapter, newCodexReadBudget, normalizeCodexHost } from './codex';
 
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/status-host-0.83.0.json', import.meta.url), 'utf8')) as {
   observations: Array<{ channel: string; payload: unknown }>;
@@ -138,6 +138,18 @@ describe('Codex normalization (synthetic variations of the audited contract)', (
     ...['401', '429', 'offline', 'access denied'].map((error) => snapshot([], { error, lastUpdated: Date.now() })),
   ])('rejects errors, missing shapes and unbound session fallbacks: %j', (value) => {
     expect(normalizeCodexHost(value)).toBeNull();
+  });
+
+  it.each([
+    [null, 'could not refresh Codex usage'],
+    [{ limits: [], error: 'No Codex usage data found. Use Codex CLI with a ChatGPT subscription to see usage.' },
+      'no Codex account limits and no recent Codex session data'],
+    [{ limits: [], error: 'EACCES: C:\\Users\\private\\.codex\\sessions' }, 'details are in Nimbalyst’s log'],
+    [{ source: 'session', limits: [limit()] }, 'fell back to recent Codex session files'],
+    [{ source: 'account', limits: {} }, 'form the panel does not recognize'],
+  ])('explains why a response was refused: %j', (value, reason) => {
+    expect(codexRejectionReason(value)).toContain(reason);
+    expect(codexRejectionReason(value)).not.toContain('private');
   });
 
   it('allows absent optional details without inferring plan or identity and drops unrelated fields', () => {

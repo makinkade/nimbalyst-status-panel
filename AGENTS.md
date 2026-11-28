@@ -15,19 +15,21 @@ mirroring the Claude Code CLI status line for the session selected in the editor
 | Chip | Shows |
 | --- | --- |
 | Model | Session model display name, e.g. `Opus 5.5 (1M)` |
-| Effort | Reasoning effort, e.g. `High` |
+| Effort | Configured reasoning effort, e.g. `High`, where the provider supports it |
 | Permission mode | Color-coded `Bypass` / `Auto` / `Plan` / `Default` |
-| Directory | Repo root folder name, or workspace folder outside a git repo |
-| Branch | Current branch plus `±n` uncommitted-file count; `No repo` outside git |
+| Directory | Workspace folder name (not a verified repository root) |
+| Branch | Current branch plus `±n` uncommitted-file count; `No repo` only when git confirms it, `Git —` / `±?` when detection fails |
 | Context | Context-window usage bar, percentage, and `↑input ↓output` tokens |
-| 5h / 7d | Claude plan utilization bars with reset times |
-| Scoped caps | Model-scoped plan limits, e.g. `7d Fable` |
+| Primary usage | The selected provider's primary window, e.g. `Claude 5h` or `Codex 5h` |
+| Secondary usage | Its secondary window, e.g. `Claude 7d` or `Codex 7d` |
+| Additional limits | Model-scoped limits (`Claude 7d Fable`), other buckets, credits, reset credits |
 | Gear | Popover for selecting and reordering segments, toggling behaviors, and seeing the running version |
 | Update | Appears only when a newer GitHub release exists |
 
 Bars turn yellow, then red, as limits approach. Readings that cannot be refreshed
 render muted so stale numbers do not look current. Every segment without data
-explains why (`No repo`, `Context —`, `No scoped caps`) instead of disappearing.
+explains why (`No repo`, `Context —`, `Additional limits — not applicable`)
+instead of disappearing.
 
 - Public repository: https://github.com/makinkade/nimbalyst-status-panel
 - License: MIT, © 2026 Mark Kinkade.
@@ -41,10 +43,14 @@ explains why (`No repo`, `Context —`, `No scoped caps`) instead of disappearin
   *Install from GitHub*, then paste the repository URL. Re-pasting the URL
   upgrades the extension in place.
 
-The extension is Claude Code first. Beside a Codex, Copilot, or Cursor session,
-the plan chips relabel to `Claude 5h` / `Claude 7d`, render muted instead of
-green/yellow/red, and name the actual session provider in their tooltip. Never
-imply that these readings report another provider's quota.
+Usage follows the selected session's provider (GET-225/226). Claude sessions
+show Claude plan usage; Codex sessions show Codex account usage reported by
+Nimbalyst; Copilot, Cursor, generic OpenAI and custom providers show an
+explained unsupported/unavailable state. Never show one provider's quota beside
+another provider's session, and never claim a reading belongs to the selected
+session's account: both Claude and Codex readings are account/config-source
+readings with unverified session association, and tooltips say so. Each card
+names its provider (`Claude 5h`, `Codex 7d`).
 
 ## Stack and commands
 
@@ -69,7 +75,8 @@ manifest.json               # id, version, permissions, panel, keybinding, marke
 src/
   index.ts                  # exports { panels, activate, deactivate }; auto-open + panel keeper wiring
   StatusPanel.tsx           # chip strip
-  useStatus.ts              # generation-guarded data subscriptions + timers
+  statusController.ts       # selection polling, session refresh, account monitors, per-session snapshots
+  useStatus.ts              # React binding for the controller
   segments.ts               # segment registry, default order, config reconciliation
   useSegmentConfig.ts       # config load/save via host.storage, global scope
   panelKeeper.ts            # reopen on host dismissal; DOM-free and testable
@@ -77,6 +84,16 @@ src/
   components/Chip.tsx
   components/ConfigChip.tsx
   components/UpdateChip.tsx
+  components/UsageChip.tsx  # one usage card
+  lib/statusModel.ts        # provider-independent Reading<T>: state, scope, timestamps
+  lib/providerAdapters.ts   # provider registry, capabilities, session normalization, selected account
+  lib/providers/claude.ts   # Claude account adapter over planUsage.ts
+  lib/providers/codex.ts    # Codex host-account normalization and throttled collector
+  lib/accountMonitor.ts     # one adapter's subscription, timers, auth epoch, retries
+  lib/accountUsageCache.ts  # memory-only, lease-scoped account reading cache
+  lib/usagePresentation.ts  # readings → Primary / Secondary / Additional usage cards
+  lib/statusPresentation.ts # common session cards
+  lib/fixtures/             # real host payloads (status-host-0.83.0.json) used by tests
   lib/ipc.ts                # typed, failure-tolerant window.electronAPI.invoke wrapper
   lib/planUsage.ts          # Claude OAuth credentials, Anthropic usage endpoint, shared cache
   lib/modelNames.ts         # parse model chip labels from ids; no version lookup table
@@ -86,6 +103,7 @@ src/
   lib/buildInfo.ts          # baked-in version + repo URL
   lib/format.ts             # formatting and Night Owl palette
   lib/thresholds.ts         # bar thresholds
+  test/uiChecks.tsx         # rendered-UI assertions shared by tests and scripts/verify-ui.html
   *.test.ts(x)              # Vitest suites beside the code
 scripts/package.mjs         # builds .nimext; re-verifies with installer's own checks
 docs/development-notes.md   # decisions, data sources, release process, verification log
@@ -106,18 +124,27 @@ through `window.electronAPI.invoke(channel, ...args)`.
 | --- | --- |
 | Session | `workspace:get-state` → `agenticCodingWindowState.selectedWorkstream` (UI selection); then `metadata.metadata.lastReadAt`; then newest `updated_at`. Resolve through `sessions:list` + `sessions:get`. |
 | Model | Latest main-thread assistant turn's served model id from `transcript:get-tail-messages`, parsed (e.g. `claude-opus-5-5` → Opus 5.5); `ai:getModels()` name as fallback. |
-| Context window | `ai:getModels()` matched on `session.model`. |
-| Effort | `ai:getEffectiveSettings`, falling back to `settings:get-default-effort-level`. |
-| Permission mode | `app-settings:get("agentPermissionMode")`, falling back to `workspace:get-state`. `bypass-all` plus `allowAllUsesClassifier: true` means `Auto`. |
+| Context | Occupancy from `session.metadata.tokenUsage.currentContext`; capacity from `currentContext.contextWindow`, then `tokenUsage.contextWindow`, then the single `ai:getModels()` entry matching `session.model` and provider. |
+| Effort | `session.metadata.effortLevel`, then `settings:get-default-effort-level`; only for providers/models that support effort. `ai:getEffectiveSettings` is not the effort contract. |
+| Permission mode | `workspace:get-state` → `agentPermissions.permissionMode` (+ `allowAllUsesClassifier`), falling back to `app-settings:get("agentPermissionMode")`. `bypass-all` plus `allowAllUsesClassifier: true` means `Auto`. |
 | Branch / dirty | `git:is-repo`, `git:branches`, `git:get-uncommitted-files`. |
 | Tokens | `session.metadata.tokenUsage`. |
-| Plan usage | `GET https://api.anthropic.com/api/oauth/usage` with header `anthropic-beta: oauth-2025-04-20`, falling back to `claude-usage:get()`. |
+| Claude usage | `GET https://api.anthropic.com/api/oauth/usage` with header `anthropic-beta: oauth-2025-04-20`, falling back to `claude-usage:get()`. |
+| Codex usage | `openai-codex:check-login` (ChatGPT auth only), then `codex-usage:refresh`; `codex-usage:update` pushes in between. Never `codex-usage:get` (arbitrarily old). Only `source: 'account'` responses are shown; the session-file fallback is rejected. Either call may start Nimbalyst's managed Codex auth app-server; the panel never spawns a client or changes login. |
 
 Refresh through subscriptions to `sessions:session-updated`,
 `sessions:session-created`, `sessions:refresh-list`, `claude-usage:update`, and the
 `open-ai-session` window event. Poll only `workspace:get-state` every 1 s to catch
 selection changes, because nothing broadcasts them. Keep the full refresh at
 5 s: it shells out to git three times.
+
+Account usage runs on its own monitors, never on the 1 s / 5 s loops. Claude
+refreshes every 60 s (the shared cache TTL). Codex reads every 5 minutes and
+uses Nimbalyst's pushed `codex-usage:update` in between, with a shared 1-minute
+floor between host calls, because each refresh calls OpenAI, writes Nimbalyst's
+usage history and broadcasts to every window. Codex usage belongs to the
+account, so it survives session switches; only a detected auth change clears
+it. See `docs/development-notes.md`, "Review fixes" (2026-11-27).
 
 Historical documentation warning: `docs/development-notes.md`, "Decisions" item 1,
 still said the panel tracked "the most recently updated session" at briefing
@@ -199,8 +226,10 @@ Preserve these rules:
    symlink to the repository; the renderer retains the module it loaded. Even
    `extension_reload` often has no effect. Only restarting Nimbalyst reliably
    runs new code. Never claim a change is live just because a build passed.
-4. **The packaged renderer console is inaccessible.** To observe runtime state,
-   write a probe with `host.storage.setGlobal(key, value)`, then read
+4. **The packaged renderer console is usually inaccessible.** This installation
+   has also exposed a renderer CDP endpoint through `DevToolsActivePort`
+   (see development notes, GET-227); recheck it rather than assume it. To
+   observe runtime state otherwise, write a probe with `host.storage.setGlobal(key, value)`, then read
    `%APPDATA%\@nimbalyst\electron\app-settings.json` → `extensionStorage` →
    `ext:com.mkinkade.status-panel:<key>`. Remove probe keys afterwards.
 5. **Unit tests can miss host-shape bugs.** Hand-built state such as

@@ -62,6 +62,18 @@ export function formatCountdown(value: string | null | undefined, now = Date.now
   return remainderHours > 0 ? `${days}d ${remainderHours}h` : `${days}d`;
 }
 
+/**
+ * A limit window's length as its shortest whole unit: 300 → "5h", 10080 → "7d",
+ * 15 → "15m". Null when the length is missing or not positive. Shared by the
+ * Codex adapter's labels and the usage tooltips so the two cannot disagree.
+ */
+export function formatDuration(minutes: number | undefined | null): string | null {
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes <= 0) return null;
+  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
+}
+
 /** Title-case a mode or effort token for display. */
 export function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();

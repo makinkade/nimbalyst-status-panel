@@ -7,7 +7,7 @@ import { latestServedModel, normalizeModels, selectedSessionId, type SessionReco
 import { adapterFor, createProviderRegistry, type AccountAdapter, type AccountIdentity } from './lib/providerAdapters';
 import { measured, type AccountUsage, type Reading, type ReadingScope } from './lib/statusModel';
 import { normalizeClaudePlan } from './lib/providers/claude';
-import { createCodexAccountAdapter, newCodexReadBudget } from './lib/providers/codex';
+import { CODEX_READ_INTERVAL_MS, createCodexAccountAdapter, newCodexReadBudget } from './lib/providers/codex';
 import { buildSegments } from './StatusPanel';
 
 const fixture = JSON.parse(readFileSync(new URL('./lib/fixtures/status-host-0.83.0.json', import.meta.url), 'utf8'));
@@ -133,15 +133,18 @@ describe('production status lifecycle with audited session/catalog payloads', ()
       h.select(codex.id);
       await h.controller.pollSelection();
       await flush();
-      expect(h.latest().readings.accounts.find((reading) => reading.scope.provider === 'openai-codex'))
-        .toMatchObject({ state: 'stale', cached: true, observedAt: null });
-      // Returning uses a display-only session snapshot; collection still starts
-      // a new epoch and respects the shared request floor.
-      await vi.advanceTimersByTimeAsync(60000);
+      // Codex limits belong to the account, not the session: returning shows
+      // the collector's live reading at once, with no new host call.
+      const returned = h.latest().readings.accounts.find((reading) => reading.scope.provider === 'openai-codex');
+      expect(returned).toMatchObject({ state: 'available', observedAt: null, scope: { association: 'unbound' } });
+      expect(returned?.cached).not.toBe(true);
+      const calls = (channel: string) => invoke.mock.calls.filter(([name]) => name === channel).length;
+      expect([calls('openai-codex:check-login'), calls('codex-usage:refresh')]).toEqual([1, 1]);
+      // The next background read is one interval after the first success.
+      await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS - 120000);
+      expect([calls('openai-codex:check-login'), calls('codex-usage:refresh')]).toEqual([2, 2]);
       expect(h.latest().readings.accounts.find((reading) => reading.scope.provider === 'openai-codex'))
         .toMatchObject({ state: 'available', observedAt: null, scope: { association: 'unbound' } });
-      expect(invoke.mock.calls.filter(([channel]) => channel === 'openai-codex:check-login')).toHaveLength(4);
-      expect(invoke.mock.calls.filter(([channel]) => channel === 'codex-usage:refresh')).toHaveLength(4);
       expect(on).toHaveBeenCalled();
       h.controller.stop();
       expect(vi.getTimerCount()).toBe(0);
@@ -526,7 +529,7 @@ describe('cached session return while refreshing', () => {
     expect(h.latest().readings.context).toMatchObject({ state: 'available', value: { tokens: 100, percent: 10 } });
   });
 
-  it('preserves Codex windows and timestamps while throttled and retries at the actual request floor', async () => {
+  it('keeps live Codex windows and timestamps across a session switch and reads again at the next interval', async () => {
     let quota = structuredClone(payload('codex-usage:refresh'));
     const invoke = vi.fn(async (channel: string) => {
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -539,17 +542,19 @@ describe('cached session return while refreshing', () => {
     expect(original.value).not.toBeNull();
     h.select(claude.id); await h.controller.pollSelection(); await flush();
     h.select(codex.id); await h.controller.pollSelection(); await flush();
-    const cached = h.latest().readings.accounts.find(a => a.scope.provider === 'openai-codex')!;
-    expect(cached).toMatchObject({ cached: true, value: original.value, fetchedAt: original.fetchedAt,
+    const returned = h.latest().readings.accounts.find(a => a.scope.provider === 'openai-codex')!;
+    expect(returned).toMatchObject({ state: 'available', value: original.value, fetchedAt: original.fetchedAt,
       lastSuccessfulFetchAt: original.lastSuccessfulFetchAt, observedAt: null });
+    expect(returned.cached).not.toBe(true);
     const html = renderToStaticMarkup(createElement(Fragment, null, ...Object.values(buildSegments(h.latest(), '<workspace>'))));
-    expect(html).toContain('20% used (cached)');
-    expect(html).toContain('previous visit to this session');
+    expect(html).toContain('20% used');
+    expect(html).not.toContain('20% used (cached)');
     expect(invoke).toHaveBeenCalledTimes(2);
     quota.limits[0].windows[0].usedPercent = 35;
-    await vi.advanceTimersByTimeAsync(58499);
+    // The first success arrived at t=2s, so the next read is due at t=302s.
+    await vi.advanceTimersByTimeAsync(CODEX_READ_INTERVAL_MS - 501);
     expect(invoke).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1); // t=61s: initial auth finished at t=1s
+    await vi.advanceTimersByTimeAsync(1);
     expect(invoke).toHaveBeenCalledTimes(3);
     await vi.advanceTimersByTimeAsync(2000);
     const refreshed = h.latest().readings.accounts.find(a => a.scope.provider === 'openai-codex')!;

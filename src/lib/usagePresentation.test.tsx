@@ -148,6 +148,19 @@ describe('units, credits and resets', () => {
     expect(render(account)).not.toContain('No additional limits or credits');
   });
 
+  it('lists each reset credit and its expiry in the reset-credit tooltip', () => {
+    const expiresAt = new Date(now + 13 * 86_400_000 + 2 * 3_600_000).toISOString();
+    const account = reading([], { buckets: [], resetCredits: { availableCount: 2, credits: [
+      { id: 'a', title: 'Full reset', description: 'Resets every window.', expiresAt },
+      { id: 'b', title: null, description: null, expiresAt: null },
+    ] } });
+    const title = groups(account).usageAdditional.cards[0].title;
+    expect(title).toMatch(/Full reset: expires \S+ \S+ \(in 13d 2h\)\. Resets every window\./);
+    expect(title).toContain('Reset credit: no expiry reported.');
+    const unreported = reading([], { buckets: [], resetCredits: { availableCount: 1, credits: null } });
+    expect(groups(unreported).usageAdditional.cards[0].title).toContain('Individual reset-credit details are not reported.');
+  });
+
   it('explains valid, missing, invalid and elapsed resets without inventing a countdown', () => {
     const card = primary(reading([window({ resetsAt: new Date(now + 3600000).toISOString() })]));
     expect(card.reset).not.toBe('');

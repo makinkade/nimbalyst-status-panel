@@ -239,7 +239,10 @@ export class StatusController {
       let monitor = this.monitors.get(adapter.id);
       if (!monitor) { monitor = new AccountMonitor(adapter, this.cache); this.monitors.set(adapter.id, monitor); }
       if (!this.invalidationWatchers.has(adapter.id) && adapter.subscribeInvalidation) {
-        this.invalidationWatchers.set(adapter.id, adapter.subscribeInvalidation(() => this.invalidateAccountSnapshots(adapter.id)));
+        this.invalidationWatchers.set(adapter.id, adapter.subscribeInvalidation(() => {
+          this.monitors.get(adapter.id)?.forget();
+          this.invalidateAccountSnapshots(adapter.id);
+        }));
       }
       if (!this.accounts.has(adapter.id)) this.accounts.set(adapter.id,
         missing('unavailable', adapter.id, adapter.scope(this.workspacePath), 'Waiting for account usage'));

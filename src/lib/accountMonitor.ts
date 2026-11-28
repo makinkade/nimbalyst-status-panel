@@ -109,6 +109,18 @@ export class AccountMonitor {
     return work;
   }
 
+  /**
+   * An auth change seen while this monitor is stopped. A stopped adapter may
+   * keep account state for the next selection (the Codex collector does), so
+   * discard it here; a running monitor already handles its own auth events.
+   */
+  forget(): void {
+    if (this.active) return;
+    this.adapter.invalidate?.();
+    this.identity = undefined;
+    this.identityCheckedAt = -Infinity;
+  }
+
   stop(): void {
     this.active = false;
     this.subscription += 1;
